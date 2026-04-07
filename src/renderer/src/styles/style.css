@@ -1,0 +1,287 @@
+:root {
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --border: #e4e9f2;
+    --border-focus: #3b82f6;
+    --text: #111827;
+    --text-2: #374151;
+    --muted: #9ca3af;
+    --accent: #3b82f6;
+    --accent-dark: #2563eb;
+    --accent-light: #eff6ff;
+    --accent-glow: rgba(59, 130, 246, 0.2);
+    --error: #ef4444;
+    --radius: 10px;
+    --radius-lg: 16px;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-size: 15px;
+}
+
+/* ─── Shell ──────────────────────────────────────────────────────────────────── */
+
+.setup-shell {
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+}
+
+.bg-glow { display: none; }
+
+/* ─── Card ───────────────────────────────────────────────────────────────────── */
+
+.setup-card {
+    width: 100%;
+    max-width: 430px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0,0,0,0.05);
+    animation: card-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes card-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Blue header band */
+.setup-card::before {
+    content: '';
+    display: block;
+    height: 5px;
+    background: linear-gradient(90deg, var(--accent), #6366f1);
+}
+
+/* Inner padding wrapper */
+.setup-card > *:not(:first-child),
+.setup-card .logo-wrap,
+.setup-card .setup-title,
+.setup-card .setup-sub,
+.setup-card .setup-form,
+.setup-card .setup-footer {
+    padding-left: 36px;
+    padding-right: 36px;
+}
+
+.logo-wrap        { padding-top: 36px; }
+.setup-footer     { padding-bottom: 32px; }
+
+/* ─── Logo ───────────────────────────────────────────────────────────────────── */
+
+.logo-wrap {
+    display: flex;
+    margin-bottom: 22px;
+}
+
+.logo {
+    width: 52px;
+    height: 52px;
+    border-radius: 13px;
+    background: linear-gradient(135deg, var(--accent), #6366f1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.55rem;
+    font-weight: 800;
+    color: #fff;
+    box-shadow: 0 4px 14px var(--accent-glow);
+    flex-shrink: 0;
+}
+
+/* ─── Headings ───────────────────────────────────────────────────────────────── */
+
+.setup-title {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.025em;
+    line-height: 1.25;
+    margin-bottom: 8px;
+}
+
+.setup-sub {
+    font-size: 0.92rem;
+    font-weight: 400;
+    color: var(--text-2);
+    line-height: 1.6;
+    margin-bottom: 28px;
+}
+
+/* ─── Form ───────────────────────────────────────────────────────────────────── */
+
+.setup-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+.field-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.field-label {
+    font-size: 0.83rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0;
+}
+
+.field-inner {
+    display: flex;
+    align-items: center;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    background: #fafbfd;
+    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.field-inner:focus-within {
+    border-color: var(--border-focus);
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+
+.field-inner.has-error {
+    border-color: var(--error);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.field-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 0.95rem;
+    font-weight: 500;
+    font-family: inherit;
+    padding: 11px 13px;
+    min-width: 0;
+}
+
+.field-input::placeholder {
+    color: var(--muted);
+    font-weight: 400;
+}
+
+.field-suffix {
+    padding: 0 13px 0 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.field-hint {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--error);
+    min-height: 1.1em;
+}
+
+.field-hint:empty { opacity: 0; }
+
+/* ─── Button ─────────────────────────────────────────────────────────────────── */
+
+.btn-primary {
+    width: 100%;
+    padding: 12px 18px;
+    background: linear-gradient(135deg, var(--accent), #6366f1);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 0.95rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 3px 12px var(--accent-glow);
+    transition: filter 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.btn-primary:hover:not(:disabled) {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px var(--accent-glow);
+}
+
+.btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(0.98);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-arrow {
+    font-size: 1rem;
+    transition: transform 0.15s;
+}
+
+.btn-primary:hover:not(:disabled) .btn-arrow {
+    transform: translateX(3px);
+}
+
+.btn-spinner {
+    width: 17px;
+    height: 17px;
+    border: 2.5px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.65s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.hidden { display: none !important; }
+
+/* ─── Footer ─────────────────────────────────────────────────────────────────── */
+
+.setup-footer {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--muted);
+    text-align: center;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    margin: 0 36px;
+}
+
+.setup-footer strong {
+    color: var(--accent);
+    font-weight: 600;
+}

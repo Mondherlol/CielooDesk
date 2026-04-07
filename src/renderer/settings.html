@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configuration — CielooDesk</title>
+  <script type="module" src="/src/settings.ts"></script>
+</head>
+<body>
+<div class="settings-shell">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+  <nav class="settings-sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-logo">C</div>
+      <span class="sidebar-brand-name">Configuration</span>
+    </div>
+
+    <p class="sidebar-label">Paramètres</p>
+    <button class="sidebar-item active" data-tab="apparence">
+      <i data-lucide="palette" class="sidebar-item-icon"></i> Apparence
+    </button>
+    <button class="sidebar-item" data-tab="connexion">
+      <i data-lucide="key-round" class="sidebar-item-icon"></i> Connexion
+    </button>
+    <button class="sidebar-item" data-tab="demarrage">
+      <i data-lucide="rocket" class="sidebar-item-icon"></i> Démarrage
+    </button>
+    <button class="sidebar-item" data-tab="raccourcis">
+      <i data-lucide="keyboard" class="sidebar-item-icon"></i> Raccourcis
+    </button>
+  </nav>
+
+  <!-- ── Content ──────────────────────────────────────────────────────────── -->
+  <main class="settings-content">
+
+    <!-- ── Tab: Apparence ─────────────────────────────────────────────────── -->
+    <div id="tab-apparence" class="settings-tab active">
+      <h2 class="tab-title">Apparence</h2>
+
+      <div class="section">
+        <p class="section-title">Fenêtre</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Mode plein écran au démarrage</span>
+            <span class="setting-desc">Lance CielooDesk en plein écran dès l'ouverture</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-fullscreen" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Position du spinner de chargement</span>
+            <span class="setting-desc">Où afficher l'indicateur pendant qu'une page charge</span>
+          </div>
+          <select class="setting-select" id="select-spinner">
+            <option value="bottom-left">Bas gauche</option>
+            <option value="bottom-right">Bas droite</option>
+            <option value="top-left">Haut gauche</option>
+            <option value="top-right">Haut droite</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Thème de l'en-tête de l'app</span>
+            <span class="setting-desc">Choisir le style de la barre supérieure indépendamment du thème Windows</span>
+          </div>
+          <select class="setting-select" id="select-header-theme">
+            <option value="system">Système (par défaut)</option>
+            <option value="light">Clair</option>
+            <option value="sky-blue">Bleu ciel</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Liens &amp; Nouvelles fenêtres</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Ouverture des liens</span>
+            <span class="setting-desc">Comment ouvrir les liens qui ciblent une nouvelle fenêtre</span>
+          </div>
+          <select class="setting-select" id="select-newwindow">
+            <option value="main">Dans la fenêtre principale</option>
+            <option value="popup">Nouvelle fenêtre liée</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Connexion ─────────────────────────────────────────────────── -->
+    <div id="tab-connexion" class="settings-tab">
+      <h2 class="tab-title">Connexion</h2>
+
+      <div class="section">
+        <p class="section-title">Connexion automatique</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Activer la connexion automatique</span>
+            <span class="setting-desc">Mémorise vos identifiants et vous connecte tout seul</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-autologin" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Identifiants mémorisés</span>
+            <span class="creds-status" id="creds-status">Vérification…</span>
+          </div>
+          <button class="btn btn-ghost" id="btn-clear-creds" disabled>
+            Effacer
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Démarrage ─────────────────────────────────────────────────── -->
+    <div id="tab-demarrage" class="settings-tab">
+      <h2 class="tab-title">Démarrage</h2>
+
+      <div class="section">
+        <p class="section-title">Système</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Lancer au démarrage de Windows</span>
+            <span class="setting-desc">Démarre CielooDesk automatiquement avec l'ordinateur</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-startup" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Raccourcis ────────────────────────────────────────────────── -->
+    <div id="tab-raccourcis" class="settings-tab">
+      <h2 class="tab-title">Raccourcis clavier</h2>
+
+      <div class="section">
+        <p class="section-title">Actions de la caisse</p>
+
+        <div id="shortcuts-list">
+          <!-- Filled dynamically by settings.ts -->
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:20px;">
+        <button class="btn btn-default" id="btn-reset-shortcuts">
+          Réinitialiser tous les raccourcis
+        </button>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+</body>
+</html>

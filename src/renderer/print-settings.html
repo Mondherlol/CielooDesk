@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Parametres d'impression - CielooDesk</title>
+  <script type="module" src="/src/print-settings.ts"></script>
+</head>
+<body>
+  <div class="print-shell">
+    <header class="print-header">
+      <h1>Parametres d'impression</h1>
+      <p>Configuration de l'imprimante CielooPrint</p>
+    </header>
+
+    <section class="card">
+      <div class="row">
+        <div>
+          <label for="select-print-printer">Imprimante par defaut</label>
+        </div>
+        <div class="inline-controls">
+          <select id="select-print-printer"></select>
+          <button id="btn-refresh-printers" class="btn btn-secondary">Actualiser</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="input-print-width">Largeur papier (mm)</label>
+          <input id="input-print-width" type="number" min="1" max="1000" />
+        </div>
+        <div class="field">
+          <label for="input-print-height">Hauteur papier (mm)</label>
+          <input id="input-print-height" type="number" min="1" max="2000" />
+        </div>
+        <div class="field">
+          <label for="select-print-orientation">Orientation</label>
+          <select id="select-print-orientation">
+            <option value="portrait">Portrait</option>
+            <option value="landscape">Paysage</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="select-print-scale">Mise a l'echelle</label>
+          <select id="select-print-scale">
+            <option value="noscale">Taille reelle</option>
+            <option value="shrink">Reduire si grand</option>
+            <option value="fit">Ajuster a la page</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="input-print-margins">Marges (mm)</label>
+          <input id="input-print-margins" type="number" min="0" max="50" />
+        </div>
+        <div class="field">
+          <label for="input-print-copies">Copies</label>
+          <input id="input-print-copies" type="number" min="1" max="99" />
+        </div>
+        <div class="field">
+          <label for="select-print-color">Couleur</label>
+          <select id="select-print-color">
+            <option value="false">Noir et Blanc</option>
+            <option value="true">Couleur</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="status" id="print-status">Chargement du statut serveur...</div>
+
+      <div class="actions">
+        <button id="btn-refresh-status" class="btn btn-secondary">Rafraichir statut</button>
+        <button id="btn-save-print" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</body>
+</html>

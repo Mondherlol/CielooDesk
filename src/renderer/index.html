@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CielooDesk — Configuration</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <div class="setup-shell">
+      <!-- Background decoration -->
+      <div class="bg-glow bg-glow-1"></div>
+      <div class="bg-glow bg-glow-2"></div>
+
+      <div class="setup-card" id="setup-card">
+        <!-- Logo -->
+        <div class="logo-wrap">
+          <div class="logo">C</div>
+        </div>
+
+        <!-- Heading -->
+        <h1 class="setup-title">Configuration de la caisse</h1>
+        <p class="setup-sub">
+          Entrez le nom de votre instance Cieloo pour démarrer.
+        </p>
+
+        <!-- Form -->
+        <form class="setup-form" id="setup-form" autocomplete="off">
+          <div class="field-wrap">
+            <label class="field-label" for="instance-input">
+              Nom de l'instance
+            </label>
+            <div class="field-inner">
+              <input
+                id="instance-input"
+                class="field-input"
+                type="text"
+                placeholder="ma-boutique"
+                spellcheck="false"
+                autocorrect="off"
+                autocapitalize="none"
+                maxlength="64"
+              />
+              <span class="field-suffix">.cieloo.io</span>
+            </div>
+            <p class="field-hint" id="field-hint"></p>
+          </div>
+
+          <button class="btn-primary" id="submit-btn" type="submit">
+            <span id="btn-label">Démarrer la caisse</span>
+            <span class="btn-arrow" id="btn-arrow">→</span>
+            <span class="btn-spinner hidden" id="btn-spinner"></span>
+          </button>
+        </form>
+
+        <p class="setup-footer">
+          L'application restera verrouillée sur <strong>*.cieloo.io</strong>
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
