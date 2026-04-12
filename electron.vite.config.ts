@@ -9,10 +9,7 @@ export default defineConfig({
         plugins: [externalizeDepsPlugin()]
     },
     renderer: {
-<<<<<<< HEAD
         publicDir: resolve('assets/img'),
-=======
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
         build: {
             rollupOptions: {
                 input: {
@@ -23,13 +20,9 @@ export default defineConfig({
                     // Print settings window
                     printSettings: resolve('src/renderer/print-settings.html'),
                     // Offline fallback page (shown when network fails during navigation)
-<<<<<<< HEAD
                     offline: resolve('src/renderer/offline.html'),
                     // Support contact page
                     contact: resolve('src/renderer/contact.html')
-=======
-                    offline: resolve('src/renderer/offline.html')
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
                 }
             }
         }

@@ -8,10 +8,7 @@ declare global {
         cieloo: {
             config: {
                 get: () => Promise<{ instance?: string }>
-<<<<<<< HEAD
                 getBootstrapInstance: () => Promise<{ instance: string; source: 'clipboard' | 'exe' } | null>
-=======
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
                 saveInstance: (instance: string) => Promise<void>
                 clear: () => Promise<void>
             }
@@ -44,12 +41,9 @@ declare global {
                 reloadLast: () => Promise<void>
                 check: () => Promise<boolean>
             }
-<<<<<<< HEAD
             app: {
                 version: () => Promise<string>
             }
-=======
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
         }
     }
 }

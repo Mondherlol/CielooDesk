@@ -107,13 +107,10 @@ select:focus {
     font-size: 0.85rem;
 }
 
-<<<<<<< HEAD
 .status:empty {
     display: none;
 }
 
-=======
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 .actions {
     display: flex;
     justify-content: flex-end;

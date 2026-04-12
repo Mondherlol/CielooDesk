@@ -5,11 +5,7 @@
  * Behaviour on a *.cieloo.io login page:
  *  1. If auto-login is enabled and credentials are stored → auto-fill + submit (once per session).
  *  2. If auto-login is enabled but no credentials stored → intercept manual submit and ask the
-<<<<<<< HEAD
  *     user whether CielooPos should remember them.
-=======
- *     user whether CielooDesk should remember them.
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
  *  3. In all other cases (feature disabled, not a login page, …) → do nothing.
  */
 import { ipcRenderer } from 'electron'
@@ -147,11 +143,7 @@ function showRememberPopup(form: HTMLFormElement, username: string, password: st
     <div style="font-size:1.05rem;font-weight:700;color:#111827;text-align:center;margin-top:2px;">
         Se souvenir de vous ?</div>
     <div style="font-size:.86rem;color:#6b7280;text-align:center;line-height:1.6;max-width:290px;">
-<<<<<<< HEAD
         CielooPos peut mémoriser vos identifiants et vous connecter
-=======
-        CielooDesk peut mémoriser vos identifiants et vous connecter
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
         automatiquement à la prochaine ouverture.</div>
     <div style="display:flex;gap:10px;margin-top:10px;width:100%;">
         <button id="_cl_no"  style="flex:1;padding:11px;border:1.5px solid #e4e9f2;

@@ -6,10 +6,6 @@ import fs from 'node:fs'
 
 export type SpinnerPosition = 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right'
 export type NewWindowMode = 'main' | 'popup'
-<<<<<<< HEAD
-=======
-export type HeaderTheme = 'system' | 'light' | 'sky-blue'
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
 export interface PrintSettings {
     enabled: boolean
@@ -38,10 +34,6 @@ export interface AppSettings {
     launchAtStartup: boolean
     newWindowMode: NewWindowMode
     spinnerPosition: SpinnerPosition
-<<<<<<< HEAD
-=======
-    headerTheme: HeaderTheme
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     shortcuts: ShortcutMap
     print: PrintSettings
 }
@@ -60,10 +52,6 @@ const DEFAULTS: AppSettings = {
     launchAtStartup: false,
     newWindowMode: 'main',
     spinnerPosition: 'bottom-left',
-<<<<<<< HEAD
-=======
-    headerTheme: 'system',
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     shortcuts: { ...DEFAULT_SHORTCUTS },
     print: {
         enabled: true,
@@ -167,28 +155,19 @@ export function openSettingsWindow(isDev: boolean, rendererUrl?: string): void {
 
     const parentWindow = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
 
-<<<<<<< HEAD
     const icon = app.isPackaged
         ? path.join(process.resourcesPath, 'assets', 'img', 'favicon.ico')
         : path.join(app.getAppPath(), 'assets', 'img', 'favicon.ico')
 
-=======
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     settingsWin = new BrowserWindow({
         width: 720,
         height: 540,
         minWidth: 640,
         minHeight: 460,
-<<<<<<< HEAD
         title: 'Configuration — CielooPos',
         backgroundColor: '#f2f3f5',
         show: false,
         icon,
-=======
-        title: 'Configuration — CielooDesk',
-        backgroundColor: '#f2f3f5',
-        show: false,
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
         parent: parentWindow ?? undefined,
         webPreferences: {
             preload: path.join(__dirname, '../preload/index.js'),
@@ -217,18 +196,6 @@ export function openSettingsWindow(isDev: boolean, rendererUrl?: string): void {
     }
 }
 
-<<<<<<< HEAD
-=======
-export function applyHeaderTheme(mainWindow: BrowserWindow, theme: HeaderTheme): void {
-    if (process.platform !== 'win32') return
-
-    // Keep native Windows title bar/buttons intact.
-    // Overlay theming on this app shell removes native title content and looks broken.
-    void mainWindow
-    void theme
-}
-
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 // ─── IPC ─────────────────────────────────────────────────────────────────────
 
 // Callback so main/index.ts can rebuild the menu after shortcut changes
@@ -246,17 +213,8 @@ export function registerSettingsIpc(
     ipcMain.handle('settings:set', (_e, key: keyof AppSettings, value: boolean | string): AppSettings => {
         const updated = updateSettings((current) => ({ ...current, [key]: value as never }))
 
-<<<<<<< HEAD
         if (key === 'launchAtStartup') app.setLoginItemSettings({ openAtLogin: Boolean(value), name: 'CielooPos' })
         if (key === 'fullscreen') getMainWindow()?.setFullScreen(Boolean(value))
-=======
-        if (key === 'launchAtStartup') app.setLoginItemSettings({ openAtLogin: Boolean(value), name: 'CielooDesk' })
-        if (key === 'fullscreen') getMainWindow()?.setFullScreen(Boolean(value))
-        if (key === 'headerTheme') {
-            const mainWindow = getMainWindow()
-            if (mainWindow) applyHeaderTheme(mainWindow, value as HeaderTheme)
-        }
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
         return updated
     })

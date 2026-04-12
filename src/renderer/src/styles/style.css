@@ -48,13 +48,9 @@ body {
     overflow: hidden;
 }
 
-<<<<<<< HEAD
 .bg-glow {
     display: none;
 }
-=======
-.bg-glow { display: none; }
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
 /* ─── Card ───────────────────────────────────────────────────────────────────── */
 
@@ -65,16 +61,11 @@ body {
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-<<<<<<< HEAD
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.05);
-=======
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0,0,0,0.05);
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     animation: card-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes card-in {
-<<<<<<< HEAD
     from {
         opacity: 0;
         transform: translateY(14px);
@@ -84,10 +75,6 @@ body {
         opacity: 1;
         transform: translateY(0);
     }
-=======
-    from { opacity: 0; transform: translateY(14px); }
-    to   { opacity: 1; transform: translateY(0); }
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 }
 
 /* Blue header band */
@@ -99,11 +86,7 @@ body {
 }
 
 /* Inner padding wrapper */
-<<<<<<< HEAD
 .setup-card>*:not(:first-child),
-=======
-.setup-card > *:not(:first-child),
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 .setup-card .logo-wrap,
 .setup-card .setup-title,
 .setup-card .setup-sub,
@@ -113,7 +96,6 @@ body {
     padding-right: 36px;
 }
 
-<<<<<<< HEAD
 .logo-wrap {
     padding-top: 36px;
 }
@@ -121,10 +103,6 @@ body {
 .setup-footer {
     padding-bottom: 32px;
 }
-=======
-.logo-wrap        { padding-top: 36px; }
-.setup-footer     { padding-bottom: 32px; }
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
 /* ─── Logo ───────────────────────────────────────────────────────────────────── */
 
@@ -209,14 +187,11 @@ body {
     box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
 }
 
-<<<<<<< HEAD
 .field-inner.has-info {
     border-color: #10b981;
     box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
 }
 
-=======
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 .field-input {
     flex: 1;
     background: transparent;
@@ -251,7 +226,6 @@ body {
     min-height: 1.1em;
 }
 
-<<<<<<< HEAD
 .field-inner.has-info+.field-hint {
     color: #047857;
 }
@@ -259,9 +233,6 @@ body {
 .field-hint:empty {
     opacity: 0;
 }
-=======
-.field-hint:empty { opacity: 0; }
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
 /* ─── Button ─────────────────────────────────────────────────────────────────── */
 
@@ -312,18 +283,13 @@ body {
 .btn-spinner {
     width: 17px;
     height: 17px;
-<<<<<<< HEAD
     border: 2.5px solid rgba(255, 255, 255, 0.3);
-=======
-    border: 2.5px solid rgba(255,255,255,0.3);
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     border-top-color: #fff;
     border-radius: 50%;
     animation: spin 0.65s linear infinite;
     flex-shrink: 0;
 }
 
-<<<<<<< HEAD
 @keyframes spin {
     to {
         transform: rotate(360deg);
@@ -333,11 +299,6 @@ body {
 .hidden {
     display: none !important;
 }
-=======
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.hidden { display: none !important; }
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
 /* ─── Footer ─────────────────────────────────────────────────────────────────── */
 
@@ -354,8 +315,4 @@ body {
 .setup-footer strong {
     color: var(--accent);
     font-weight: 600;
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be

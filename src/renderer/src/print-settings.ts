@@ -32,17 +32,10 @@ function setStatus(status: PrintStatus): void {
         return
     }
     if (!status.printer) {
-<<<<<<< HEAD
         label.textContent = `Serveur actif. Aucune imprimante par defaut configuree.`
         return
     }
     label.textContent = `Serveur actif. Imprimante: ${status.printer}.`
-=======
-        label.textContent = `Serveur actif sur ${status.serverUrl}. Aucune imprimante par defaut configuree.`
-        return
-    }
-    label.textContent = `Serveur actif sur ${status.serverUrl}. Imprimante: ${status.printer}.`
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 }
 
 function applyConfigToForm(config: PrintSettings): void {

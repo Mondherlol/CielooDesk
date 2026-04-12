@@ -28,7 +28,6 @@ function initTabs(): void {
     })
 }
 
-<<<<<<< HEAD
 function initDevMenu(): void {
     const versionEl = document.getElementById('sidebar-version')
     const devMenuEl = document.getElementById('dev-menu')
@@ -80,12 +79,6 @@ function initDevMenu(): void {
 
 const SHORTCUT_LABELS: Record<keyof ShortcutMap, string> = {
     reload: 'Recharger la page',
-=======
-// ─── Shortcut editor ──────────────────────────────────────────────────────────
-
-const SHORTCUT_LABELS: Record<keyof ShortcutMap, string> = {
-    reload: 'Recharger la caisse',
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     hardReload: 'Forcer le rechargement',
     fullscreen: 'Plein écran',
     quit: 'Quitter',
@@ -249,7 +242,6 @@ async function refreshCredsStatus(): Promise<void> {
 async function init(): Promise<void> {
     createIcons({ icons: { Palette, KeyRound, Rocket, Keyboard } })
     initTabs()
-<<<<<<< HEAD
     initDevMenu()
 
     const [settings, version] = await Promise.all([
@@ -258,19 +250,11 @@ async function init(): Promise<void> {
     ])
     const versionEl = document.getElementById('sidebar-version')
     if (versionEl) versionEl.textContent = `V. ${version}`
-=======
-
-    const settings = await window.cieloo.settings.get()
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
         // Apparence
         ; (document.getElementById('toggle-fullscreen') as HTMLInputElement).checked = settings.fullscreen
         ; (document.getElementById('select-spinner') as HTMLSelectElement).value = settings.spinnerPosition
         ; (document.getElementById('select-newwindow') as HTMLSelectElement).value = settings.newWindowMode
-<<<<<<< HEAD
-=======
-        ; (document.getElementById('select-header-theme') as HTMLSelectElement).value = settings.headerTheme
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
         // Connexion
         ; (document.getElementById('toggle-autologin') as HTMLInputElement).checked = settings.autoLogin
@@ -308,15 +292,6 @@ async function init(): Promise<void> {
         toast('Mode d\'ouverture des liens mis à jour')
     })
 
-<<<<<<< HEAD
-=======
-    document.getElementById('select-header-theme')!.addEventListener('change', async (e) => {
-        const v = (e.target as HTMLSelectElement).value
-        await window.cieloo.settings.set('headerTheme', v as never)
-        toast('Thème de l\'en-tête mis à jour')
-    })
-
->>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     document.getElementById('btn-clear-creds')!.addEventListener('click', async () => {
         await window.cieloo.autoLogin.clearCredentials()
         await refreshCredsStatus()
