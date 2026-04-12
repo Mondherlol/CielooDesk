@@ -1,0 +1,28 @@
+appId: io.cieloo.cieloodesk
+productName: CielooDesk
+directories:
+  output: release
+compression: maximum
+asar: true
+electronLanguages:
+  - fr
+  - en-US
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: assets
+    to: assets
+    filter:
+      - SumatraPDF-settings.txt
+      - AnyDesk.exe
+  - from: assets/img
+    to: assets/img
+win:
+  icon: assets/img/favicon.ico
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

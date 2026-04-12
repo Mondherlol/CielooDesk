@@ -1,0 +1,31 @@
+{
+  "name": "CielooPosv2",
+  "version": "0.1.0",
+  "description": "CielooPos desktop shell",
+  "main": "out/main/index.js",
+  "author": "Mondher",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "predist": "node scripts/pre-dist-clean.cjs",
+    "dist": "node scripts/run-dist.cjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "lucide": "^1.7.0",
+    "multer": "^1.4.5-lts.2",
+    "pdf-to-printer": "^5.6.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
+    "@types/node": "22.15.30",
+    "electron": "35.0.0",
+    "electron-builder": "24.13.3",
+    "electron-vite": "3.1.0",
+    "typescript": "5.8.3"
+  }
+}
