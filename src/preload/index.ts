@@ -67,6 +67,25 @@ contextBridge.exposeInMainWorld('cieloo', {
 
     app: {
         version: (): Promise<string> => ipcRenderer.invoke('app:version'),
+    },
+
+    updater: {
+        check: (): Promise<{ status: 'checking' | 'dev' }> =>
+            ipcRenderer.invoke('updater:check'),
+        installNow: (): Promise<void> =>
+            ipcRenderer.invoke('updater:install-now'),
+        onUpdateAvailable: (cb: (info: { version: string; releaseNotes: string | null }) => void) => {
+            ipcRenderer.on('updater:update-available', (_e, info) => cb(info))
+        },
+        onUpToDate: (cb: (info: { version: string }) => void) => {
+            ipcRenderer.on('updater:up-to-date', (_e, info) => cb(info))
+        },
+        onDownloadProgress: (cb: (progress: { percent: number; transferred: number; total: number }) => void) => {
+            ipcRenderer.on('updater:download-progress', (_e, progress) => cb(progress))
+        },
+        onCheckRequested: (cb: () => void) => {
+            ipcRenderer.on('updater:check-requested', () => cb())
+        },
     }
 
 })

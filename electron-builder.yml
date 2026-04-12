@@ -26,3 +26,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+publish:
+  provider: github
+  owner: YOUR_GITHUB_USERNAME
+  repo: CielooDesk

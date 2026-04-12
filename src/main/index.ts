@@ -15,6 +15,7 @@ import {
     startPrintServer,
     stopPrintServer,
 } from '../modules/print-server/main'
+import { initAutoUpdater, registerUpdaterIpc } from '../modules/updater/main'
 
 const isDev = !app.isPackaged
 
@@ -425,6 +426,11 @@ function buildMenu(): void {
         {
             label: 'Contacter le support',
             click: () => openContactWindow()
+        },
+        { type: 'separator' },
+        {
+            label: 'Vérifier les mises à jour',
+            click: () => mainWindow?.webContents.send('updater:check-requested')
         }
     ]
 
@@ -896,7 +902,9 @@ app.whenReady().then(() => {
 
     buildMenu()
     registerIpc()
+    registerUpdaterIpc()
     createMainWindow()
+    initAutoUpdater(() => mainWindow)
 
     // Alt+Enter as secondary fullscreen shortcut (not expressible as a single menu accelerator)
     globalShortcut.register('Alt+Return', () => {
