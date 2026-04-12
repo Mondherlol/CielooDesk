@@ -2,11 +2,14 @@ appId: io.cieloo.cieloodesk
 productName: CielooDesk
 directories:
   output: release
+<<<<<<< HEAD
 compression: maximum
 asar: true
 electronLanguages:
   - fr
   - en-US
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 files:
   - out/**
   - package.json
@@ -14,12 +17,18 @@ extraResources:
   - from: assets
     to: assets
     filter:
+<<<<<<< HEAD
       - SumatraPDF-settings.txt
       - AnyDesk.exe
   - from: assets/img
     to: assets/img
 win:
   icon: assets/img/favicon.ico
+=======
+      - SumatraPDF.exe
+      - SumatraPDF-settings.txt
+win:
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
   target:
     - nsis
 nsis:

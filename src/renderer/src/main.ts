@@ -28,13 +28,17 @@ function setError(msg: string): void {
 }
 
 function clearError(): void {
+<<<<<<< HEAD
     if (fieldInner.classList.contains('has-info')) {
         fieldInner.classList.remove('has-info')
     }
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     hint.textContent = ''
     fieldInner.classList.remove('has-error')
 }
 
+<<<<<<< HEAD
 function setDetectedInfo(source: 'clipboard' | 'exe'): void {
     const suffix = source === 'clipboard'
         ? 'depuis votre presse-papiers.'
@@ -51,6 +55,8 @@ async function prefillInstance(): Promise<void> {
     setDetectedInfo(suggestion.source)
 }
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 input.addEventListener('input', clearError)
 
 form.addEventListener('submit', async (e) => {
@@ -85,7 +91,10 @@ form.addEventListener('submit', async (e) => {
 
 // Auto-focus
 input.focus()
+<<<<<<< HEAD
 
 void prefillInstance().catch(() => {
     // Non-blocking: manual entry remains available if auto-detection fails.
 })
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be

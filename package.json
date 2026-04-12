@@ -1,15 +1,25 @@
 {
+<<<<<<< HEAD
   "name": "CielooPosv2",
   "version": "0.1.0",
   "description": "CielooPos desktop shell",
+=======
+  "name": "cieloodeskv2",
+  "version": "1.0.0",
+  "description": "CielooDesk desktop shell",
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
   "main": "out/main/index.js",
   "author": "Mondher",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+<<<<<<< HEAD
     "predist": "node scripts/pre-dist-clean.cjs",
     "dist": "node scripts/run-dist.cjs"
+=======
+    "dist": "npm run build && electron-builder"
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
   },
   "dependencies": {
     "cors": "^2.8.5",

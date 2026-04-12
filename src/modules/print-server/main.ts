@@ -40,8 +40,11 @@ function resolveSumatraPath(): string {
             path.join(process.resourcesPath, 'assets', 'SumatraPDF.exe'),
             // Fallback if file ended up unpacked from app.asar.
             path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'SumatraPDF.exe'),
+<<<<<<< HEAD
             // pdf-to-printer bundles its own Sumatra binary here.
             path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pdf-to-printer', 'dist', 'SumatraPDF-3.4.6-32.exe'),
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
             path.join(process.resourcesPath, 'SumatraPDF.exe'),
         ]
         : [

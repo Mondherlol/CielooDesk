@@ -42,6 +42,7 @@ function writeConfig(c: Config): void {
     fs.writeFileSync(configPath(), JSON.stringify(c, null, 2))
 }
 
+<<<<<<< HEAD
 function normalizeInstance(value: string): string | null {
     const clean = value.trim().toLowerCase()
     if (!INSTANCE_REGEX.test(clean)) return null
@@ -102,15 +103,21 @@ function deleteConfig(): void {
     }
 }
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 // ─── Window ───────────────────────────────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null
 let lastCielooUrl = ''
+<<<<<<< HEAD
 let forcedWindowFullscreenForHtml = false
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
 // Error codes that indicate a genuine network failure (not a server/app error)
 const NET_ERROR_CODES = new Set([-21, -100, -101, -102, -105, -106, -109, -118, -137, -138])
 
+<<<<<<< HEAD
 const BASE_PAGE_RESET_CSS = 'html,body{margin:0!important;padding:0!important;border:0!important}'
 const CIELOO_FULLSCREEN_OVERFLOW_FIX_CSS = 'html,body{max-width:100%!important;overflow-x:hidden!important}'
 
@@ -126,6 +133,8 @@ function injectRuntimeCss(wc: Electron.WebContents, url: string): void {
     void wc.insertCSS(css)
 }
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 function loadOfflinePage(): void {
     if (!mainWindow) return
     if (isDev && process.env.ELECTRON_RENDERER_URL) {
@@ -315,6 +324,7 @@ function hideLoadingOverlay(): void {
     }, wait)
 }
 
+<<<<<<< HEAD
 // ─── App icon ─────────────────────────────────────────────────────────────────
 
 function resolveAppIcon(): string {
@@ -342,6 +352,8 @@ function launchAnyDesk(): void {
     spawn(exePath, [], { detached: true, stdio: 'ignore' }).unref()
 }
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 // Called once on start and whenever shortcuts change
 function buildMenu(): void {
     const sc = loadSettings().shortcuts
@@ -359,7 +371,11 @@ function buildMenu(): void {
         },
         { type: 'separator' },
         {
+<<<<<<< HEAD
             label: 'Recharger la page',
+=======
+            label: 'Recharger la caisse',
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
             accelerator: sc.reload,
             click: () => mainWindow?.webContents.reload()
         },
@@ -417,6 +433,7 @@ function buildMenu(): void {
         }
     ]
 
+<<<<<<< HEAD
     const supportSubmenu: Electron.MenuItemConstructorOptions[] = [
         {
             label: 'Lancer AnyDesk',
@@ -448,10 +465,13 @@ function buildMenu(): void {
         }
     ]
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     const menuTemplate: Electron.MenuItemConstructorOptions[] = [
         { label: 'Caisse', submenu: caisseSubmenu },
         { label: 'Navigation', submenu: navigationSubmenu },
         { label: 'Affichage', submenu: affichageSubmenu },
+<<<<<<< HEAD
         { label: 'Paramètres', submenu: paramsSubmenu },
         { label: 'Support', submenu: supportSubmenu }
     ]
@@ -460,6 +480,11 @@ function buildMenu(): void {
         menuTemplate.push({ label: 'Dev', submenu: devSubmenu })
     }
 
+=======
+        { label: 'Paramètres', submenu: paramsSubmenu }
+    ]
+
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate))
 }
 
@@ -476,8 +501,12 @@ function openPrintSettingsWindow(): void {
         height: 620,
         minWidth: 700,
         minHeight: 560,
+<<<<<<< HEAD
         icon: resolveAppIcon(),
         title: 'Parametres d\'impression - CielooPos',
+=======
+        title: 'Parametres d\'impression - CielooDesk',
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
         backgroundColor: '#f3f5f8',
         show: false,
         parent: parentWindow,
@@ -505,6 +534,7 @@ function openPrintSettingsWindow(): void {
     }
 }
 
+<<<<<<< HEAD
 let contactWindow: BrowserWindow | null = null
 
 function openContactWindow(): void {
@@ -542,6 +572,8 @@ function openContactWindow(): void {
     }
 }
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 // ─── URL helpers ──────────────────────────────────────────────────────────────
 
 function isCielooUrl(url: string): boolean {
@@ -552,19 +584,25 @@ function isLocalUrl(url: string): boolean {
     return url.startsWith('file://') || url.startsWith('http://localhost:')
 }
 
+<<<<<<< HEAD
 function isExternalContactLink(url: string): boolean {
     return url.startsWith('mailto:') || url.startsWith('tel:')
 }
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 // Enforce navigation lock on any webContents (main + popups)
 function lockNavigation(wc: Electron.WebContents): void {
     wc.on('will-navigate', (event, url) => {
         if (isDev && isLocalUrl(url)) return
+<<<<<<< HEAD
         if (isExternalContactLink(url)) {
             event.preventDefault()
             void shell.openExternal(url)
             return
         }
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
         if (isCielooUrl(url)) return
         event.preventDefault()
     })
@@ -580,11 +618,14 @@ function lockNavigation(wc: Electron.WebContents): void {
 function handleWindowOpen(url: string): Electron.WindowOpenHandlerResponse {
     const mode = loadSettings().newWindowMode
 
+<<<<<<< HEAD
     if (isExternalContactLink(url)) {
         void shell.openExternal(url)
         return { action: 'deny' }
     }
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     // Never open non-cieloo URLs
     if (!isCielooUrl(url)) return { action: 'deny' }
 
@@ -601,7 +642,11 @@ function handleWindowOpen(url: string): Electron.WindowOpenHandlerResponse {
             width: 1280,
             height: 820,
             backgroundColor: '#ffffff',
+<<<<<<< HEAD
             title: 'CielooPos',
+=======
+            title: 'CielooDesk',
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
             webPreferences: {
                 preload: path.join(__dirname, '../preload/index.js'),
                 contextIsolation: true,
@@ -621,6 +666,7 @@ function loadContent(): void {
 
     if (config.instance) {
         void mainWindow.loadURL(`https://${config.instance}.cieloo.io`)
+<<<<<<< HEAD
         return
     }
 
@@ -629,6 +675,8 @@ function loadContent(): void {
         writeConfig({ instance: suggested.instance })
         void mainWindow.loadURL(`https://${suggested.instance}.cieloo.io`)
         return
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     } else if (isDev && process.env.ELECTRON_RENDERER_URL) {
         void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
     } else {
@@ -637,6 +685,7 @@ function loadContent(): void {
 }
 
 function createMainWindow(): void {
+<<<<<<< HEAD
     const display = screen.getPrimaryDisplay()
     const workArea = display.workAreaSize
     const initialWidth = Math.min(1400, workArea.width)
@@ -653,12 +702,24 @@ function createMainWindow(): void {
         icon: resolveAppIcon(),
         backgroundColor: '#ffffff',
         title: 'CielooPos',
+=======
+    const settings = loadSettings()
+    const mainWindowOptions: Electron.BrowserWindowConstructorOptions = {
+        width: 1400,
+        height: 900,
+        minWidth: 1100,
+        minHeight: 700,
+        show: false,
+        backgroundColor: '#ffffff',
+        title: 'CielooDesk',
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
         webPreferences: {
             preload: path.join(__dirname, '../preload/index.js'),
             contextIsolation: true,
             sandbox: false,
             nodeIntegration: false,
             webSecurity: true,
+<<<<<<< HEAD
             spellcheck: false,
         }
     }
@@ -667,6 +728,19 @@ function createMainWindow(): void {
 
     enforceStableWebViewRendering(mainWindow.webContents)
 
+=======
+            spellcheck: false
+        }
+    }
+
+    if (process.platform === 'darwin') {
+        mainWindowOptions.titleBarStyle = 'hiddenInset'
+    }
+
+    mainWindow = new BrowserWindow(mainWindowOptions)
+
+    applyHeaderTheme(mainWindow, settings.headerTheme)
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 
     mainWindow.once('ready-to-show', () => {
         mainWindow?.show()
@@ -705,6 +779,7 @@ function createMainWindow(): void {
         hideLoadingOverlay()
     })
 
+<<<<<<< HEAD
     // Keep rendering stable on POS displays (fixed zoom + anti horizontal overflow).
     mainWindow.webContents.on('did-finish-load', () => {
         if (!mainWindow) return
@@ -717,10 +792,18 @@ function createMainWindow(): void {
         if (!mainWindow) return
         enforceStableWebViewRendering(mainWindow.webContents)
         injectRuntimeCss(mainWindow.webContents, url)
+=======
+    // Gap fix: inject CSS on every page load to remove stray top margins
+    mainWindow.webContents.on('did-navigate', (_e, url) => {
+        void mainWindow?.webContents.insertCSS(
+            'html,body{margin:0!important;padding:0!important;border:0!important}'
+        )
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
         // Track last known good cieloo URL for offline recovery
         if (isCielooUrl(url)) lastCielooUrl = url
     })
 
+<<<<<<< HEAD
     mainWindow.webContents.on('did-navigate-in-page', (_e, url) => {
         if (!mainWindow) return
         enforceStableWebViewRendering(mainWindow.webContents)
@@ -744,6 +827,8 @@ function createMainWindow(): void {
         if (!loadSettings().fullscreen) mainWindow.setFullScreen(false)
     })
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     // ── Offline: intercept renderer-initiated navigation while offline ─────────
     // Fires for location.href changes, form submits, location.reload(), etc.
     // Prevents the PHP page from being destroyed when network is lost.
@@ -771,6 +856,7 @@ function createMainWindow(): void {
 app.on('web-contents-created', (_e, wc) => {
     lockNavigation(wc)
     wc.setWindowOpenHandler(({ url }) => handleWindowOpen(url))
+<<<<<<< HEAD
     enforceStableWebViewRendering(wc)
 
     wc.on('did-finish-load', () => {
@@ -788,6 +874,8 @@ app.on('web-contents-created', (_e, wc) => {
         enforceStableWebViewRendering(wc)
         injectRuntimeCss(wc, url)
     })
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 })
 
 // ─── IPC ─────────────────────────────────────────────────────────────────────
@@ -795,10 +883,15 @@ app.on('web-contents-created', (_e, wc) => {
 function registerIpc(): void {
     ipcMain.handle('config:get', () => readConfig())
 
+<<<<<<< HEAD
     ipcMain.handle('config:get-bootstrap-instance', () => detectBootstrapInstance())
 
     ipcMain.handle('config:save-instance', (_e, instance: string) => {
         const clean = normalizeInstance(instance)
+=======
+    ipcMain.handle('config:save-instance', (_e, instance: string) => {
+        const clean = instance.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
         if (!clean) throw new Error('Nom d\'instance invalide')
         writeConfig({ instance: clean })
         void mainWindow?.loadURL(`https://${clean}.cieloo.io`)
@@ -813,6 +906,7 @@ function registerIpc(): void {
         }
     })
 
+<<<<<<< HEAD
     ipcMain.handle('dev:reset-config', () => {
         if (!isDev) return
         deleteConfig()
@@ -824,6 +918,8 @@ function registerIpc(): void {
         loadOfflinePage()
     })
 
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
     registerAutoLoginIpc()
     registerSettingsIpc(isDev, process.env.ELECTRON_RENDERER_URL, () => mainWindow)
     onRebuildMenu(buildMenu)
@@ -885,8 +981,11 @@ function registerIpc(): void {
     ipcMain.handle('nav:can-go-back', () => mainWindow?.webContents.navigationHistory.canGoBack() ?? false)
     ipcMain.handle('nav:can-go-forward', () => mainWindow?.webContents.navigationHistory.canGoForward() ?? false)
     ipcMain.handle('loading:is-active', (e) => e.sender.isLoadingMainFrame())
+<<<<<<< HEAD
 
     ipcMain.handle('app:version', () => app.getVersion())
+=======
+>>>>>>> 2ebdac883576851199e5d6fb221c8ae7350462be
 }
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
