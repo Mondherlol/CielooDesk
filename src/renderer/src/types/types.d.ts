@@ -1,3 +1,4 @@
+
 export { }
 
 import type { AppSettings, ShortcutMap, PrintSettings } from '../../../modules/settings/main'
@@ -43,14 +44,6 @@ declare global {
             }
             app: {
                 version: () => Promise<string>
-            }
-            updater: {
-                check: () => Promise<{ status: 'checking' | 'dev' }>
-                installNow: () => Promise<void>
-                onUpdateAvailable: (cb: (info: { version: string; releaseNotes: string | null }) => void) => void
-                onUpToDate: (cb: (info: { version: string }) => void) => void
-                onDownloadProgress: (cb: (progress: { percent: number; transferred: number; total: number }) => void) => void
-                onCheckRequested: (cb: () => void) => void
             }
         }
     }

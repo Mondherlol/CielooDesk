@@ -1,5 +1,5 @@
-appId: io.cieloo.cieloodesk
-productName: CielooDesk
+appId: io.cieloo.cieloopos
+productName: CielooPos
 directories:
   output: release
 compression: maximum
@@ -28,5 +28,5 @@ nsis:
   allowToChangeInstallationDirectory: true
 publish:
   provider: github
-  owner: YOUR_GITHUB_USERNAME
+  owner: mondherlol
   repo: CielooDesk

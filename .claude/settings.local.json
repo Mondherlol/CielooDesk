@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cmd /c \"cd /d C:\\\\Users\\\\mondh\\\\OneDrive\\\\Desktop\\\\CielooDesk && npx tsc --noEmit 2>&1\")"
+      "Bash(cmd /c \"cd /d C:\\\\Users\\\\mondh\\\\OneDrive\\\\Desktop\\\\CielooDesk && npx tsc --noEmit 2>&1\")",
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\(p.dependencies['electron-updater']\\)\")"
     ]
   }
 }
