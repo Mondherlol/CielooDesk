@@ -9,7 +9,8 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "predist": "node scripts/pre-dist-clean.cjs",
-    "dist": "node scripts/run-dist.cjs"
+    "dist": "node scripts/run-dist.cjs",
+    "release": "electron-vite build && electron-builder --publish always"
   },
   "dependencies": {
     "cors": "^2.8.5",

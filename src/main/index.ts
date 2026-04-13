@@ -893,6 +893,7 @@ function registerIpc(): void {
     ipcMain.handle('loading:is-active', (e) => e.sender.isLoadingMainFrame())
 
     ipcMain.handle('app:version', () => app.getVersion())
+    ipcMain.handle('app:is-dev', () => isDev)
 }
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────

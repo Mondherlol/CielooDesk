@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('cieloo', {
 
     app: {
         version: (): Promise<string> => ipcRenderer.invoke('app:version'),
+        isDev: (): Promise<boolean> => ipcRenderer.invoke('app:is-dev'),
     },
 
     updater: {

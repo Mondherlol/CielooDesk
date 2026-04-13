@@ -121,12 +121,15 @@ function keydownToAccelerator(e: KeyboardEvent): string | null {
 
 let currentShortcuts: ShortcutMap = {} as ShortcutMap
 
-function renderShortcuts(shortcuts: ShortcutMap): void {
+function renderShortcuts(shortcuts: ShortcutMap, isDev: boolean): void {
     currentShortcuts = { ...shortcuts }
     const container = document.getElementById('shortcuts-list')!
     container.innerHTML = ''
 
-        ; (Object.keys(SHORTCUT_LABELS) as (keyof ShortcutMap)[]).forEach(id => {
+    const visibleShortcutIds = (Object.keys(SHORTCUT_LABELS) as (keyof ShortcutMap)[])
+        .filter((id) => isDev || id !== 'devtools')
+
+        ; (visibleShortcutIds).forEach(id => {
             const row = document.createElement('div')
             row.className = 'shortcut-row'
 
@@ -244,9 +247,10 @@ async function init(): Promise<void> {
     initTabs()
     initDevMenu()
 
-    const [settings, version] = await Promise.all([
+    const [settings, version, isDev] = await Promise.all([
         window.cieloo.settings.get(),
         window.cieloo.app.version(),
+        window.cieloo.app.isDev(),
     ])
     const versionEl = document.getElementById('sidebar-version')
     if (versionEl) versionEl.textContent = `V. ${version}`
@@ -264,7 +268,7 @@ async function init(): Promise<void> {
         ; (document.getElementById('toggle-startup') as HTMLInputElement).checked = settings.launchAtStartup
 
     // Raccourcis
-    renderShortcuts(settings.shortcuts)
+    renderShortcuts(settings.shortcuts, isDev)
 
     // ── Wire controls ────────────────────────────────────────────────────────
 
@@ -300,7 +304,7 @@ async function init(): Promise<void> {
 
     document.getElementById('btn-reset-shortcuts')!.addEventListener('click', async () => {
         const updated = await window.cieloo.settings.resetShortcuts()
-        renderShortcuts(updated.shortcuts)
+        renderShortcuts(updated.shortcuts, isDev)
         toast('Raccourcis réinitialisés')
     })
 }

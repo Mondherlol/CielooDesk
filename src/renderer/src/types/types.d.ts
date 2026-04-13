@@ -44,6 +44,7 @@ declare global {
             }
             app: {
                 version: () => Promise<string>
+                isDev: () => Promise<boolean>
             }
         }
     }
