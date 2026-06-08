@@ -266,6 +266,7 @@ async function init(): Promise<void> {
 
         // Démarrage
         ; (document.getElementById('toggle-startup') as HTMLInputElement).checked = settings.launchAtStartup
+        ; (document.getElementById('toggle-require-printer') as HTMLInputElement).checked = settings.requirePrinter ?? false
 
     // Raccourcis
     renderShortcuts(settings.shortcuts, isDev)
@@ -283,6 +284,7 @@ async function init(): Promise<void> {
     wireToggle('toggle-fullscreen', 'fullscreen', 'Plein écran')
     wireToggle('toggle-autologin', 'autoLogin', 'Connexion automatique')
     wireToggle('toggle-startup', 'launchAtStartup', 'Démarrage automatique')
+    wireToggle('toggle-require-printer', 'requirePrinter', 'Imprimante obligatoire')
 
     document.getElementById('select-spinner')!.addEventListener('change', async (e) => {
         const v = (e.target as HTMLSelectElement).value

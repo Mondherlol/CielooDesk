@@ -850,8 +850,36 @@ function registerIpc(): void {
     ipcMain.handle('print:save-config', async (_e, payload: Partial<PrintSettings>) => {
         const updated = setPrintSettings(payload)
         const status = await applyPrintSettings(updated.print)
+        mainWindow?.webContents.send('print:config-updated')
         return { config: updated.print, status }
     })
+
+    ipcMain.handle('print:printer-check', async () => {
+        const settings = loadSettings()
+        const configured = settings.print.defaultPrinter !== null
+        let connected = false
+        if (configured) {
+            try {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    // Use getPrintersAsync directly to access the status field.
+                    // PRINTER_STATUS_OFFLINE (Win32 0x80) means the printer is physically
+                    // unreachable — driver installed but device disconnected or powered off.
+                    const PRINTER_STATUS_OFFLINE = 0x80
+                    const printers = await mainWindow.webContents.getPrintersAsync()
+                    const match = printers.find(p => p.name === settings.print.defaultPrinter)
+                    connected = match !== undefined && (match.status & PRINTER_STATUS_OFFLINE) === 0
+                } else {
+                    const printers = await getSystemPrinters(null)
+                    connected = printers.some(p => p.name === settings.print.defaultPrinter)
+                }
+            } catch {
+                connected = false
+            }
+        }
+        return { configured, connected }
+    })
+
+    ipcMain.handle('print:open-settings', () => openPrintSettingsWindow())
 
     // ── Réseau ────────────────────────────────────────────────────────────────
     // Called by the offline page or preload to reload the last known cieloo URL

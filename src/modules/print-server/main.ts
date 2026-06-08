@@ -28,6 +28,7 @@ const CIELOO_CORS = /^https:\/\/([a-z0-9-]+\.)*cieloo\.io$/i
 let server: ReturnType<express.Application['listen']> | null = null
 let currentSettings: PrintSettings = normalizePrintSettings(undefined)
 let printRequests: number[] = []
+const openConnections = new Set<{ destroy(): void }>()
 
 function uploadsDir(): string {
     return path.join(app.getPath('userData'), 'cieloo-print-uploads')
@@ -258,6 +259,11 @@ export async function startPrintServer(printSettings: PrintSettings): Promise<Pr
             resolve()
         })
 
+        nextServer.on('connection', (socket) => {
+            openConnections.add(socket)
+            socket.on('close', () => openConnections.delete(socket))
+        })
+
         nextServer.once('error', (error) => {
             reject(error)
         })
@@ -279,6 +285,9 @@ export async function stopPrintServer(): Promise<void> {
 
     const activeServer = server
     server = null
+
+    for (const conn of openConnections) conn.destroy()
+    openConnections.clear()
 
     await new Promise<void>((resolve) => {
         activeServer.close(() => resolve())

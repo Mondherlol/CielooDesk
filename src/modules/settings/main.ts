@@ -36,6 +36,7 @@ export interface AppSettings {
     spinnerPosition: SpinnerPosition
     shortcuts: ShortcutMap
     print: PrintSettings
+    requirePrinter: boolean
 }
 
 export const DEFAULT_SHORTCUTS: ShortcutMap = {
@@ -53,6 +54,7 @@ const DEFAULTS: AppSettings = {
     newWindowMode: 'main',
     spinnerPosition: 'bottom-left',
     shortcuts: { ...DEFAULT_SHORTCUTS },
+    requirePrinter: false,
     print: {
         enabled: true,
         port: 9100,
@@ -216,6 +218,7 @@ export function registerSettingsIpc(
         if (key === 'launchAtStartup') app.setLoginItemSettings({ openAtLogin: Boolean(value), name: 'CielooPos' })
         if (key === 'fullscreen') getMainWindow()?.setFullScreen(Boolean(value))
 
+        getMainWindow()?.webContents.send('settings:updated')
         return updated
     })
 

@@ -31,6 +31,8 @@ declare global {
                 getConfig: () => Promise<PrintSettings>
                 getStatus: () => Promise<PrintServerStatus>
                 saveConfig: (print: Partial<PrintSettings>) => Promise<{ config: PrintSettings; status: PrintServerStatus }>
+                printerCheck: () => Promise<{ configured: boolean; connected: boolean }>
+                openSettings: () => Promise<void>
             }
             nav: {
                 goBack: () => Promise<void>

@@ -2,7 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(cmd /c \"cd /d C:\\\\Users\\\\mondh\\\\OneDrive\\\\Desktop\\\\CielooDesk && npx tsc --noEmit 2>&1\")",
-      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\(p.dependencies['electron-updater']\\)\")"
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\(p.dependencies['electron-updater']\\)\")",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\mondh\\\\OneDrive\\\\Desktop\\\\CielooPOSMobile\")",
+      "PowerShell(node --version)",
+      "PowerShell(npm --version)",
+      "PowerShell(npx react-native --version 2>$null)",
+      "PowerShell(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\mondh\\\\OneDrive\\\\Desktop\\\\CielooPOSMobile\\\\CielooPOSMobile\\\\src\\\\screens\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\mondh\\\\OneDrive\\\\Desktop\\\\CielooPOSMobile\\\\CielooPOSMobile\\\\src\\\\services\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\mondh\\\\OneDrive\\\\Desktop\\\\CielooPOSMobile\\\\CielooPOSMobile\\\\src\\\\components\")",
+      "Read(//c/Users/mondh/.gradle/**)",
+      "Read(//c/Users/mondh/OneDrive/Desktop/CielooClub/CielooClub/android/**)",
+      "Read(//c/Users/mondh/OneDrive/Desktop/CielooClub/CielooClub/**)"
     ]
   }
 }
