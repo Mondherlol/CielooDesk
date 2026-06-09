@@ -1,12 +1,13 @@
-import { app, BrowserWindow, ipcMain, Menu, globalShortcut, net, dialog, shell, clipboard, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, globalShortcut, net, dialog, shell, clipboard, screen, session } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
+import { start as startLocalMediaServer, stop as stopLocalMediaServer } from '../modules/local-media-server/main'
 
 import { registerAutoLoginIpc } from '../modules/auto-login/main'
 import {
     registerSettingsIpc, applyBootSettings, openSettingsWindow,
-    loadSettings, onRebuildMenu, setPrintSettings, type PrintSettings
+    loadSettings, onRebuildMenu, setPrintSettings, updateSettings, type PrintSettings
 } from '../modules/settings/main'
 import {
     applyPrintSettings,
@@ -15,6 +16,7 @@ import {
     startPrintServer,
     stopPrintServer,
 } from '../modules/print-server/main'
+import { startSecondScreen, syncSecondScreen } from '../modules/second-screen/main'
 import { initAutoUpdater, registerUpdaterIpc } from '../modules/updater/main'
 
 const isDev = !app.isPackaged
@@ -108,6 +110,7 @@ function deleteConfig(): void {
 let mainWindow: BrowserWindow | null = null
 let lastCielooUrl = ''
 let forcedWindowFullscreenForHtml = false
+let secondScreenEditorWindow: BrowserWindow | null = null
 
 // Error codes that indicate a genuine network failure (not a server/app error)
 const NET_ERROR_CODES = new Set([-21, -100, -101, -102, -105, -106, -109, -118, -137, -138])
@@ -136,6 +139,7 @@ function loadOfflinePage(): void {
     }
 }
 let printSettingsWindow: BrowserWindow | null = null
+let secondDisplaySettingsWindow: BrowserWindow | null = null
 let loadingOverlayWindow: BrowserWindow | null = null
 let loadingOverlayShownAt = 0
 let loadingOverlayHideTimer: NodeJS.Timeout | null = null
@@ -164,6 +168,147 @@ function openCielooPath(pathname: string): void {
     const origin = resolveCielooOrigin()
     if (!origin) return
     void mainWindow?.loadURL(`${origin}${pathname}`)
+}
+
+function resolveActiveCielooUrl(): string | null {
+    const currentUrl = mainWindow?.webContents.getURL() ?? ''
+    if (isCielooUrl(currentUrl)) return currentUrl
+    if (isCielooUrl(lastCielooUrl)) return lastCielooUrl
+    return resolveCielooOrigin()
+}
+
+function resolveSecondScreenUrl(): string | null {
+    const activeUrl = resolveActiveCielooUrl()
+    if (!activeUrl) return null
+
+    try {
+        const { origin } = new URL(activeUrl)
+        return `${origin}/custom/cieloopos/secondscreen.php`
+    } catch {
+        return null
+    }
+}
+
+function resolveSecondScreenEditorUrl(): string | null {
+    const activeUrl = resolveActiveCielooUrl()
+    if (!activeUrl) return null
+
+    try {
+        const { origin } = new URL(activeUrl)
+        return `${origin}/custom/cieloopos/admin/secondscreen_editor.php?focus=1`
+    } catch {
+        return null
+    }
+}
+
+function openSecondScreenFromMainWindow(): void {
+    const targetUrl = resolveSecondScreenUrl()
+    if (!targetUrl) {
+        void dialog.showMessageBox({
+            type: 'warning',
+            title: 'Second ecran indisponible',
+            message: 'Impossible de determiner la page Cieloo active.',
+            detail: 'Ouvrez d abord votre instance Cieloo dans la fenetre principale, puis relancez le second ecran.',
+        })
+        return
+    }
+
+    const secondScreen = startSecondScreen(targetUrl)
+    if (secondScreen) return
+
+    void dialog.showMessageBox({
+        type: 'info',
+        title: 'Second ecran non detecte',
+        message: 'Aucun second ecran n a ete detecte pour le moment.',
+        detail: 'Branchez un ecran supplementaire et le module reessaiera automatiquement pendant quelques secondes.',
+    })
+}
+
+function openSecondScreenEditorWindow(): void {
+    const targetUrl = resolveSecondScreenEditorUrl()
+    if (!targetUrl) {
+        void dialog.showMessageBox({
+            type: 'warning',
+            title: 'Studio d edition indisponible',
+            message: 'Impossible de determiner l instance Cieloo active.',
+            detail: 'Ouvrez d abord votre instance Cieloo dans la fenetre principale, puis relancez le studio d edition.',
+        })
+        return
+    }
+
+    if (secondScreenEditorWindow && !secondScreenEditorWindow.isDestroyed()) {
+        if (secondScreenEditorWindow.webContents.getURL() !== targetUrl) {
+            void secondScreenEditorWindow.loadURL(targetUrl)
+        }
+        if (secondScreenEditorWindow.isMinimized()) secondScreenEditorWindow.restore()
+        secondScreenEditorWindow.show()
+        secondScreenEditorWindow.focus()
+        return
+    }
+
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+    secondScreenEditorWindow = new BrowserWindow({
+        width: 1360,
+        height: 880,
+        minWidth: 1100,
+        minHeight: 720,
+        icon: resolveAppIcon(),
+        title: 'Studio d edition - CielooPos',
+        backgroundColor: '#ffffff',
+        show: false,
+        parent: parentWindow,
+        webPreferences: {
+            preload: path.join(__dirname, '../preload/index.js'),
+            contextIsolation: true,
+            sandbox: false,
+            nodeIntegration: false,
+            webSecurity: true,
+            spellcheck: false,
+        },
+    })
+
+    secondScreenEditorWindow.once('ready-to-show', () => {
+        secondScreenEditorWindow?.show()
+    })
+    secondScreenEditorWindow.on('closed', () => {
+        secondScreenEditorWindow = null
+    })
+
+    void secondScreenEditorWindow.loadURL(targetUrl)
+}
+
+async function selectSecondDisplayMediaFolder(): Promise<string | null> {
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+    const currentFolder = loadSettings().secondDisplayMediaFolder ?? undefined
+
+    const dialogOptions = {
+        title: 'Selectionner le dossier des medias du second afficheur',
+        properties: ['openDirectory', 'createDirectory'],
+        defaultPath: currentFolder,
+        buttonLabel: 'Selectionner ce dossier',
+    } satisfies Electron.OpenDialogOptions
+
+    const result = parentWindow
+        ? await dialog.showOpenDialog(parentWindow, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions)
+
+    if (result.canceled || result.filePaths.length === 0) return null
+
+    const selectedFolder = result.filePaths[0]
+    updateSettings((current) => ({
+        ...current,
+        secondDisplayMediaFolder: selectedFolder,
+    }))
+
+    return selectedFolder
+}
+
+function clearSecondDisplayMediaFolder(): void {
+    updateSettings((current) => ({
+        ...current,
+        secondDisplayMediaFolder: null,
+    }))
 }
 
 function createOverlayHtml(): string {
@@ -343,6 +488,11 @@ function launchAnyDesk(): void {
     spawn(exePath, [], { detached: true, stdio: 'ignore' }).unref()
 }
 
+function toggleFocusedWindowDevTools(): void {
+    const focusedWindow = BrowserWindow.getFocusedWindow() ?? mainWindow
+    focusedWindow?.webContents.toggleDevTools()
+}
+
 // Called once on start and whenever shortcuts change
 function buildMenu(): void {
     const sc = loadSettings().shortcuts
@@ -393,6 +543,11 @@ function buildMenu(): void {
             label: 'Plein écran',
             accelerator: sc.fullscreen,
             click: () => { if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen()) }
+        },
+        { type: 'separator' },
+        {
+            label: 'Demarrer le second ecran',
+            click: () => openSecondScreenFromMainWindow()
         }
     ]
 
@@ -402,7 +557,7 @@ function buildMenu(): void {
             {
                 label: 'Outils développeurs',
                 accelerator: sc.devtools,
-                click: () => mainWindow?.webContents.toggleDevTools()
+                click: () => toggleFocusedWindowDevTools()
             }
         )
     }
@@ -415,6 +570,10 @@ function buildMenu(): void {
         {
             label: 'Paramètres d\'impression',
             click: () => openPrintSettingsWindow()
+        },
+        {
+            label: 'Parametres second afficheur',
+            click: () => openSecondDisplaySettingsWindow()
         }
     ]
 
@@ -450,7 +609,7 @@ function buildMenu(): void {
         {
             label: 'Outils développeurs',
             accelerator: sc.devtools,
-            click: () => mainWindow?.webContents.toggleDevTools()
+            click: () => toggleFocusedWindowDevTools()
         }
     ]
 
@@ -508,6 +667,48 @@ function openPrintSettingsWindow(): void {
         void printSettingsWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/print-settings.html`)
     } else {
         void printSettingsWindow.loadFile(path.join(__dirname, '../renderer/print-settings.html'))
+    }
+}
+
+function openSecondDisplaySettingsWindow(): void {
+    if (secondDisplaySettingsWindow && !secondDisplaySettingsWindow.isDestroyed()) {
+        secondDisplaySettingsWindow.focus()
+        return
+    }
+
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+    secondDisplaySettingsWindow = new BrowserWindow({
+        width: 760,
+        height: 620,
+        minWidth: 700,
+        minHeight: 560,
+        icon: resolveAppIcon(),
+        title: 'Parametres second afficheur - CielooPos',
+        backgroundColor: '#f3f5f8',
+        show: false,
+        parent: parentWindow,
+        webPreferences: {
+            preload: path.join(__dirname, '../preload/index.js'),
+            contextIsolation: true,
+            sandbox: false,
+            nodeIntegration: false,
+            spellcheck: false,
+        },
+    })
+
+    secondDisplaySettingsWindow.setMenu(null)
+    secondDisplaySettingsWindow.once('ready-to-show', () => {
+        secondDisplaySettingsWindow?.show()
+    })
+    secondDisplaySettingsWindow.on('closed', () => {
+        secondDisplaySettingsWindow = null
+    })
+
+    if (isDev && process.env.ELECTRON_RENDERER_URL) {
+        void secondDisplaySettingsWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/second-display-settings.html`)
+    } else {
+        void secondDisplaySettingsWindow.loadFile(path.join(__dirname, '../renderer/second-display-settings.html'))
     }
 }
 
@@ -660,6 +861,7 @@ function createMainWindow(): void {
         backgroundColor: '#ffffff',
         title: 'CielooPos',
         webPreferences: {
+            session: session.defaultSession,
             preload: path.join(__dirname, '../preload/index.js'),
             contextIsolation: true,
             sandbox: false,
@@ -673,12 +875,38 @@ function createMainWindow(): void {
 
     enforceStableWebViewRendering(mainWindow.webContents)
 
+    let bootSettingsApplied = false
+    let showFallbackTimer: NodeJS.Timeout | null = null
+
+    const syncSecondScreenWhenMainIsVisible = (forceReload = false): void => {
+        if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return
+        const secondScreenUrl = resolveSecondScreenUrl()
+        if (secondScreenUrl) syncSecondScreen(secondScreenUrl, { forceReload })
+    }
+
+    const showMainWindow = (): void => {
+        if (!mainWindow || mainWindow.isDestroyed()) return
+        if (showFallbackTimer) {
+            clearTimeout(showFallbackTimer)
+            showFallbackTimer = null
+        }
+
+        if (!mainWindow.isVisible()) mainWindow.show()
+
+        if (!bootSettingsApplied) {
+            bootSettingsApplied = true
+            applyBootSettings(mainWindow)
+        }
+
+        flushPendingLoadingOverlay()
+        syncSecondScreenWhenMainIsVisible()
+    }
 
     mainWindow.once('ready-to-show', () => {
-        mainWindow?.show()
-        applyBootSettings(mainWindow!)
-        flushPendingLoadingOverlay()
+        showMainWindow()
     })
+
+    showFallbackTimer = setTimeout(showMainWindow, 2500)
 
     mainWindow.on('move', syncLoadingOverlayBounds)
     mainWindow.on('resize', syncLoadingOverlayBounds)
@@ -689,6 +917,10 @@ function createMainWindow(): void {
     mainWindow.on('minimize', hideLoadingOverlayImmediate)
     mainWindow.on('hide', hideLoadingOverlayImmediate)
     mainWindow.on('closed', () => {
+        if (showFallbackTimer) {
+            clearTimeout(showFallbackTimer)
+            showFallbackTimer = null
+        }
         loadingOverlayPending = false
         if (loadingOverlayHideTimer) {
             clearTimeout(loadingOverlayHideTimer)
@@ -715,8 +947,10 @@ function createMainWindow(): void {
     mainWindow.webContents.on('did-finish-load', () => {
         if (!mainWindow) return
         const currentUrl = mainWindow.webContents.getURL()
+        showMainWindow()
         enforceStableWebViewRendering(mainWindow.webContents)
         injectRuntimeCss(mainWindow.webContents, currentUrl)
+        syncSecondScreenWhenMainIsVisible(true)
     })
 
     mainWindow.webContents.on('did-navigate', (_e, url) => {
@@ -725,6 +959,7 @@ function createMainWindow(): void {
         injectRuntimeCss(mainWindow.webContents, url)
         // Track last known good cieloo URL for offline recovery
         if (isCielooUrl(url)) lastCielooUrl = url
+        syncSecondScreenWhenMainIsVisible()
     })
 
     mainWindow.webContents.on('did-navigate-in-page', (_e, url) => {
@@ -732,6 +967,7 @@ function createMainWindow(): void {
         enforceStableWebViewRendering(mainWindow.webContents)
         injectRuntimeCss(mainWindow.webContents, url)
         if (isCielooUrl(url)) lastCielooUrl = url
+        syncSecondScreenWhenMainIsVisible()
     })
 
     // Some pages use HTML5 fullscreen (requestFullscreen). On small POS displays,
@@ -767,6 +1003,7 @@ function createMainWindow(): void {
         if (!isMainFrame) return
         if (!isCielooUrl(url)) return
         if (!NET_ERROR_CODES.has(errorCode)) return
+        showMainWindow()
         loadOfflinePage()
     })
 
@@ -922,11 +1159,24 @@ function registerIpc(): void {
 
     ipcMain.handle('app:version', () => app.getVersion())
     ipcMain.handle('app:is-dev', () => isDev)
+    ipcMain.handle('second-display:open-settings', () => {
+        openSecondDisplaySettingsWindow()
+    })
+    ipcMain.handle('second-display:open-editor', () => {
+        openSecondScreenEditorWindow()
+    })
+    ipcMain.handle('second-display:select-media-folder', () => {
+        return selectSecondDisplayMediaFolder()
+    })
+    ipcMain.handle('second-display:clear-media-folder', () => {
+        clearSecondDisplayMediaFolder()
+    })
 }
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+    await startLocalMediaServer()
     void startPrintServer(loadSettings().print)
 
     buildMenu()
@@ -948,6 +1198,10 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
     globalShortcut.unregisterAll()
     void stopPrintServer()
+})
+
+app.on('before-quit', () => {
+    void stopLocalMediaServer()
 })
 
 app.on('window-all-closed', () => {

@@ -19,6 +19,8 @@ export default defineConfig({
                     settings: resolve('src/renderer/settings.html'),
                     // Print settings window
                     printSettings: resolve('src/renderer/print-settings.html'),
+                    // Second display settings window
+                    secondDisplaySettings: resolve('src/renderer/second-display-settings.html'),
                     // Offline fallback page (shown when network fails during navigation)
                     offline: resolve('src/renderer/offline.html'),
                     // Support contact page

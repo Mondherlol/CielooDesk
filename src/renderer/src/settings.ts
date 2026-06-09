@@ -259,7 +259,6 @@ async function init(): Promise<void> {
         ; (document.getElementById('toggle-fullscreen') as HTMLInputElement).checked = settings.fullscreen
         ; (document.getElementById('select-spinner') as HTMLSelectElement).value = settings.spinnerPosition
         ; (document.getElementById('select-newwindow') as HTMLSelectElement).value = settings.newWindowMode
-
         // Connexion
         ; (document.getElementById('toggle-autologin') as HTMLInputElement).checked = settings.autoLogin
     await refreshCredsStatus()
@@ -286,6 +285,7 @@ async function init(): Promise<void> {
     wireToggle('toggle-startup', 'launchAtStartup', 'Démarrage automatique')
     wireToggle('toggle-require-printer', 'requirePrinter', 'Imprimante obligatoire')
 
+
     document.getElementById('select-spinner')!.addEventListener('change', async (e) => {
         const v = (e.target as HTMLSelectElement).value
         await window.cieloo.settings.set('spinnerPosition', v as never)
@@ -296,6 +296,11 @@ async function init(): Promise<void> {
         const v = (e.target as HTMLSelectElement).value
         await window.cieloo.settings.set('newWindowMode', v as never)
         toast('Mode d\'ouverture des liens mis à jour')
+    })
+
+
+    document.getElementById('btn-open-second-display-settings')!.addEventListener('click', async () => {
+        await window.cieloo.secondDisplay.openSettings()
     })
 
     document.getElementById('btn-clear-creds')!.addEventListener('click', async () => {

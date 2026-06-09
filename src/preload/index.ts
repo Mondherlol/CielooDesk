@@ -42,6 +42,17 @@ contextBridge.exposeInMainWorld('cieloo', {
             ipcRenderer.invoke('settings:open')
     },
 
+    secondDisplay: {
+        openSettings: (): Promise<void> =>
+            ipcRenderer.invoke('second-display:open-settings'),
+        openEditor: (): Promise<void> =>
+            ipcRenderer.invoke('second-display:open-editor'),
+        selectMediaFolder: (): Promise<string | null> =>
+            ipcRenderer.invoke('second-display:select-media-folder'),
+        clearMediaFolder: (): Promise<void> =>
+            ipcRenderer.invoke('second-display:clear-media-folder'),
+    },
+
     print: {
         getPrinters: (): Promise<Array<{ name: string; isDefault: boolean }>> =>
             ipcRenderer.invoke('print:get-printers'),
@@ -146,7 +157,10 @@ injectBaseStyles()
 
 function isSettingsPage(): boolean {
     const href = window.location.href
-    return href.includes('settings.html') || href.includes('print-settings.html') || href.includes('contact.html')
+    return href.includes('settings.html')
+        || href.includes('print-settings.html')
+        || href.includes('second-display-settings.html')
+        || href.includes('contact.html')
 }
 
 function runInjections(): void {

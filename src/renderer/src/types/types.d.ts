@@ -26,6 +26,12 @@ declare global {
                 resetShortcuts: () => Promise<AppSettings>
                 open: () => Promise<void>
             }
+            secondDisplay: {
+                openSettings: () => Promise<void>
+                openEditor: () => Promise<void>
+                selectMediaFolder: () => Promise<string | null>
+                clearMediaFolder: () => Promise<void>
+            }
             print: {
                 getPrinters: () => Promise<Array<{ name: string; isDefault: boolean }>>
                 getConfig: () => Promise<PrintSettings>

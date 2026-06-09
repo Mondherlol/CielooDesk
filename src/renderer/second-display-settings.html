@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Parametres second afficheur - CielooPos</title>
+  <link rel="icon" href="/favicon.ico" />
+  <script type="module" src="/src/second-display-settings.ts"></script>
+</head>
+<body>
+<div class="settings-shell">
+
+  <nav class="settings-sidebar">
+    <div class="sidebar-brand">
+      <img class="sidebar-brand-logo" src="/512_rounded.png" alt="CielooPos" />
+      <span class="sidebar-brand-name">Parametres second afficheur</span>
+    </div>
+
+    <p class="sidebar-label">Parametres</p>
+    <button class="sidebar-item active" data-tab="demarrage">
+      <i data-lucide="monitor-smartphone" class="sidebar-item-icon"></i> Demarrage
+    </button>
+    <button class="sidebar-item" data-tab="personnalisations">
+      <i data-lucide="paintbrush-vertical" class="sidebar-item-icon"></i> Personnalisations
+    </button>
+
+    <div class="sidebar-version" id="sidebar-version">V. 0.1</div>
+  </nav>
+
+  <main class="settings-content">
+    <div id="tab-demarrage" class="settings-tab active">
+      <h2 class="tab-title">Demarrage</h2>
+
+      <div class="section">
+        <p class="section-title">Second ecran</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Demarrer automatiquement sur le second ecran</span>
+            <span class="setting-desc">Ouvre automatiquement le second afficheur quand un ecran supplementaire est detecte</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-second-display-autostart" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-personnalisations" class="settings-tab">
+      <h2 class="tab-title">Personnalisations</h2>
+
+      <div class="section">
+        <p class="section-title">Studio d edition</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Editeur du second afficheur</span>
+            <span class="setting-desc">Ouvre l interface de personnalisation du second ecran pour l instance active</span>
+          </div>
+          <button class="btn btn-default" id="btn-open-second-display-editor">
+            Ouvrir le studio d'edition
+          </button>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Medias</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Dossier des medias locaux</span>
+            <span class="setting-desc">Le serveur local recuperera uniquement les fichiers depuis ce dossier quand il est defini</span>
+            <span class="setting-value" id="second-display-media-folder-value">Aucun dossier selectionne</span>
+          </div>
+          <div class="setting-actions">
+            <button class="btn btn-default" id="btn-select-second-display-media-folder">
+              Selectionner un dossier
+            </button>
+            <button class="btn btn-ghost" id="btn-clear-second-display-media-folder">
+              Effacer
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+</body>
+</html>

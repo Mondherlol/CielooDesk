@@ -2,7 +2,10 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 function run(cmd, args) {
-  const result = spawnSync(cmd, args, { stdio: 'inherit' })
+  const result = spawnSync(cmd, args, {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  })
   if (result.error) {
     console.error(result.error)
     process.exit(1)

@@ -32,6 +32,8 @@ export interface AppSettings {
     autoLogin: boolean
     fullscreen: boolean
     launchAtStartup: boolean
+    secondDisplayAutoStart: boolean
+    secondDisplayMediaFolder: string | null
     newWindowMode: NewWindowMode
     spinnerPosition: SpinnerPosition
     shortcuts: ShortcutMap
@@ -51,6 +53,8 @@ const DEFAULTS: AppSettings = {
     autoLogin: false,
     fullscreen: false,
     launchAtStartup: false,
+    secondDisplayAutoStart: true,
+    secondDisplayMediaFolder: null,
     newWindowMode: 'main',
     spinnerPosition: 'bottom-left',
     shortcuts: { ...DEFAULT_SHORTCUTS },
@@ -93,12 +97,19 @@ export function normalizePrintSettings(value: Partial<PrintSettings> | undefined
     }
 }
 
-function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
+function mergeWithDefaults(parsed: Partial<AppSettings> & { secondScreen?: unknown }): AppSettings {
+    const { secondScreen: _legacySecondScreen, ...rest } = parsed
+    const rawMediaFolder = rest.secondDisplayMediaFolder
+
     return {
         ...DEFAULTS,
-        ...parsed,
-        shortcuts: { ...DEFAULT_SHORTCUTS, ...(parsed.shortcuts ?? {}) },
-        print: normalizePrintSettings(parsed.print),
+        ...rest,
+        secondDisplayAutoStart: rest.secondDisplayAutoStart !== false,
+        secondDisplayMediaFolder: typeof rawMediaFolder === 'string' && rawMediaFolder.trim()
+            ? rawMediaFolder.trim()
+            : null,
+        shortcuts: { ...DEFAULT_SHORTCUTS, ...(rest.shortcuts ?? {}) },
+        print: normalizePrintSettings(rest.print),
     }
 }
 
