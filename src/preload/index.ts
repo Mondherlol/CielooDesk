@@ -138,15 +138,22 @@ let _pendingUpdateVersion: string | null = null
 let _pendingProgress: { percent: number; transferred: number; total: number } | null = null
 let _downloadedVersion: string | null = null
 
+let _splashShown = false
+
 const _ut = {
     showAvailable: null as ((version: string) => void) | null,
     setProgress: null as ((p: { percent: number; transferred: number; total: number }) => void) | null,
     showReady: null as ((version: string) => void) | null,
+    showCheckModal: null as (() => void) | null,
+    setCheckResult: null as ((type: 'up-to-date' | 'dev', version?: string) => void) | null,
+    completeCheckStep: null as ((updateFound: boolean) => void) | null,
 }
 
 ipcRenderer.on('updater:update-available', (_e: unknown, info: { version: string }) => {
     _pendingUpdateVersion = info.version
     _ut.showAvailable?.(info.version)
+    _ut.setCheckResult?.('up-to-date')      // close the check modal
+    _ut.completeCheckStep?.(true)           // splash: update found, fade out
 })
 ipcRenderer.on('updater:download-progress', (_e: unknown, p: { percent: number; transferred: number; total: number }) => {
     _pendingProgress = p
@@ -157,6 +164,16 @@ ipcRenderer.on('updater:update-downloaded', (_e: unknown, info: { version: strin
     _pendingUpdateVersion = null
     _pendingProgress = null
     _ut.showReady?.(info.version)
+})
+ipcRenderer.on('updater:up-to-date', (_e: unknown, info: { version: string }) => {
+    _ut.setCheckResult?.('up-to-date', info.version)
+    _ut.completeCheckStep?.(false)          // splash: all good, fade out
+})
+ipcRenderer.on('updater:check-requested', () => {
+    _ut.showCheckModal?.()
+    void ipcRenderer.invoke('updater:check').then((result: { status: 'checking' | 'dev' }) => {
+        if (result.status === 'dev') _ut.setCheckResult?.('dev')
+    })
 })
 
 // Printer config saved or setting changed → re-check immediately (no polling needed)
@@ -204,6 +221,7 @@ function isSettingsPage(): boolean {
 
 function runInjections(): void {
     if (isSettingsPage()) return
+    injectSplash()
     injectUpdateToast()
     if (isExternalPage()) injectOverlays()
 }
@@ -704,147 +722,311 @@ function showPrinterToast(configured: boolean, connected: boolean): void {
     })
 }
 
+// ─── Startup splash ───────────────────────────────────────────────────────────
+
+function injectSplash(): void {
+    if (_splashShown) return
+    _splashShown = true
+
+    const SVG_CHECK = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+
+    const styleEl = document.createElement('style')
+    styleEl.textContent = `
+        @keyframes _sp_fadein  { from{opacity:0} to{opacity:1} }
+        @keyframes _sp_fadeout { from{opacity:1} to{opacity:0;pointer-events:none} }
+        @keyframes _sp_slicein { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes _sp_spin    { to{transform:rotate(360deg)} }
+        @keyframes _sp_pop     { 0%{transform:scale(0)} 65%{transform:scale(1.25)} 100%{transform:scale(1)} }
+        #_cl_splash{
+            font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
+            position:fixed;inset:0;z-index:2147483647;
+            background:#fff;
+            display:flex;flex-direction:column;align-items:center;justify-content:center;
+            animation:_sp_fadein .25s ease;
+        }
+        #_cl_splash.sp-out{animation:_sp_fadeout .45s ease forwards;}
+        #_cl_splash *{box-sizing:border-box;}
+        #_sp_badge{
+            width:80px;height:80px;border-radius:22px;
+            background:linear-gradient(135deg,#3b82f6,#6366f1);
+            display:flex;align-items:center;justify-content:center;
+            color:#fff;font-size:1.7rem;font-weight:900;letter-spacing:-.04em;
+            box-shadow:0 10px 32px rgba(59,130,246,.38);
+            margin-bottom:22px;user-select:none;overflow:hidden;
+        }
+        #_sp_badge img{width:80px;height:80px;display:block;border-radius:22px;}
+        #_sp_name{color:#111827;font-size:1.5rem;font-weight:800;letter-spacing:-.03em;margin-bottom:5px;}
+        #_sp_sub{color:#9ca3af;font-size:.82rem;margin-bottom:44px;}
+        #_sp_steps{display:flex;flex-direction:column;gap:14px;min-width:250px;}
+        .sp_step{
+            display:flex;align-items:center;gap:11px;
+            opacity:0;
+        }
+        .sp_step.sp-show{animation:_sp_slicein .3s ease forwards;}
+        .sp_icon{width:20px;height:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+        .sp_dot{width:8px;height:8px;border-radius:50%;background:#e5e7eb;}
+        .sp_spinner{
+            width:18px;height:18px;
+            border:2px solid #e5e7eb;border-top-color:#3b82f6;
+            border-radius:50%;animation:_sp_spin .7s linear infinite;
+        }
+        .sp_check{
+            width:20px;height:20px;border-radius:50%;
+            display:flex;align-items:center;justify-content:center;
+            animation:_sp_pop .28s cubic-bezier(.34,1.56,.64,1) forwards;
+        }
+        .sp_check.green{background:#10b981;}
+        .sp_check.blue{background:#3b82f6;}
+        .sp_label{font-size:.84rem;font-weight:500;color:#9ca3af;transition:color .2s;}
+        .sp_step.sp-active .sp_label{color:#374151;}
+        .sp_step.sp-done  .sp_label{color:#d1d5db;}
+        #_sp_ver{position:absolute;bottom:22px;color:#d1d5db;font-size:.72rem;letter-spacing:.02em;}
+    `
+
+    const splashEl = document.createElement('div')
+    splashEl.id = '_cl_splash'
+    splashEl.innerHTML = `
+        <div id="_sp_badge">CP</div>
+        <div id="_sp_name">CielooPos</div>
+        <div id="_sp_sub">Système de caisse</div>
+        <div id="_sp_steps">
+            <div class="sp_step" id="_sp_s1">
+                <div class="sp_icon"><div class="sp_dot"></div></div>
+                <span class="sp_label">Initialisation de la caisse</span>
+            </div>
+            <div class="sp_step" id="_sp_s2">
+                <div class="sp_icon"><div class="sp_dot"></div></div>
+                <span class="sp_label">Chargement de la configuration</span>
+            </div>
+            <div class="sp_step" id="_sp_s3">
+                <div class="sp_icon"><div class="sp_dot"></div></div>
+                <span class="sp_label">Vérification des mises à jour</span>
+            </div>
+        </div>
+        <div id="_sp_ver"></div>
+    `
+
+    document.head.appendChild(styleEl)
+    document.body.appendChild(splashEl)
+
+    function stepEl(id: string): HTMLElement | null { return document.getElementById(id) }
+    function setIcon(el: HTMLElement, html: string): void {
+        const icon = el.querySelector('.sp_icon')
+        if (icon) icon.innerHTML = html
+    }
+    function activate(id: string): void {
+        const el = stepEl(id)
+        if (!el) return
+        el.classList.add('sp-show', 'sp-active')
+        setIcon(el, '<div class="sp_spinner"></div>')
+    }
+    function complete(id: string, color: 'green' | 'blue' = 'green', label?: string): void {
+        const el = stepEl(id)
+        if (!el) return
+        el.classList.remove('sp-active')
+        el.classList.add('sp-done')
+        setIcon(el, `<div class="sp_check ${color}">${SVG_CHECK}</div>`)
+        if (label) {
+            const lbl = el.querySelector('.sp_label')
+            if (lbl) lbl.textContent = label
+        }
+    }
+
+    function fadeSplash(): void {
+        splashEl.classList.add('sp-out')
+        setTimeout(() => { splashEl.remove(); styleEl.remove() }, 500)
+    }
+
+    // ── Load real app icon ───────────────────────────────────────────────────────
+    void ipcRenderer.invoke('app:icon-url').then((url: string | null) => {
+        const badge = document.getElementById('_sp_badge')
+        if (!badge || !url) return
+        badge.style.background = 'none'
+        badge.style.boxShadow = 'none'
+        badge.innerHTML = `<img src="${url}" alt="CielooPos" />`
+    }).catch(() => { /* keep fallback CP text */ })
+
+    // ── Sequence ────────────────────────────────────────────────────────────────
+
+    let checkDone = false
+    let checkTimer: ReturnType<typeof setTimeout> | null = null
+
+    function onCheckResult(updateFound: boolean): void {
+        if (checkDone) return
+        checkDone = true
+        if (checkTimer) { clearTimeout(checkTimer); checkTimer = null }
+        if (updateFound) {
+            complete('_sp_s3', 'blue', 'Mise à jour détectée !')
+        } else {
+            complete('_sp_s3', 'green')
+        }
+        setTimeout(fadeSplash, 700)
+    }
+
+    // Step 1: immediate
+    activate('_sp_s1')
+    setTimeout(() => {
+        complete('_sp_s1')
+        // Step 2: 500ms after step 1
+        activate('_sp_s2')
+        setTimeout(() => {
+            complete('_sp_s2')
+            // Step 3: shown, waits for updater result (timeout 8s)
+            activate('_sp_s3')
+            checkTimer = setTimeout(() => onCheckResult(false), 8_000)
+        }, 600)
+    }, 500)
+
+    _ut.completeCheckStep = onCheckResult
+}
+
 // ─── Update toast ─────────────────────────────────────────────────────────────
 
 function injectUpdateToast(): void {
     if (document.getElementById('_cl_update_toast')) return
 
-    const SVG_DOWNLOAD = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`
-    const SVG_CHECK = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+    const SVG_DL_ICON = `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`
+    const SVG_OK_ICON = `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
 
     const styleEl = document.createElement('style')
     styleEl.textContent = `
+        @keyframes _cl_ut_fadein{from{opacity:0}to{opacity:1}}
+        @keyframes _cl_ut_cardin{from{opacity:0;transform:translateY(18px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
         #_cl_update_toast *{box-sizing:border-box;}
         #_cl_update_toast{
             font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
-            position:fixed;bottom:20px;right:20px;z-index:2147483646;
-            background:#fff;border-radius:16px;padding:16px 18px 14px;
-            box-shadow:0 8px 32px rgba(0,0,0,.14),0 2px 8px rgba(0,0,0,.06),inset 0 0 0 1px rgba(0,0,0,.05);
-            width:296px;max-width:calc(100vw - 40px);
-            pointer-events:none;opacity:0;
-            transform:translateY(16px) scale(.97);
-            transition:transform .35s cubic-bezier(.16,1,.3,1),opacity .3s ease;
+            position:fixed;inset:0;z-index:2147483646;
+            background:rgba(10,15,30,.6);
+            backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+            display:none;align-items:center;justify-content:center;
+            animation:_cl_ut_fadein .3s ease;
         }
-        #_cl_update_toast.ut-visible{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}
-        #_cl_ut_header{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
-        #_cl_ut_icon{
-            width:34px;height:34px;border-radius:10px;flex-shrink:0;
+        #_cl_update_toast.ut-visible{display:flex;}
+        #_cl_ut_card{
+            background:#fff;border-radius:24px;
+            padding:36px 32px 28px;
+            box-shadow:0 24px 80px rgba(0,0,0,.22),0 4px 16px rgba(0,0,0,.1);
+            width:380px;max-width:calc(100vw - 40px);
+            display:flex;flex-direction:column;align-items:center;
+            animation:_cl_ut_cardin .35s cubic-bezier(.16,1,.3,1);
+        }
+        #_cl_ut_icon_wrap{
+            width:72px;height:72px;border-radius:50%;
             display:flex;align-items:center;justify-content:center;
-            background:linear-gradient(135deg,#3b82f6 0%,#6366f1 100%);
-            color:#fff;transition:background .4s ease;
+            margin-bottom:20px;flex-shrink:0;
+            transition:background .4s ease,color .4s ease;
         }
-        #_cl_ut_icon.done{background:linear-gradient(135deg,#10b981 0%,#34d399 100%);}
-        #_cl_ut_title{color:#111827;font-size:.875rem;font-weight:700;letter-spacing:-.015em;line-height:1.2;}
-        #_cl_ut_version{color:#9ca3af;font-size:.73rem;margin-top:2px;}
-        #_cl_ut_bar_track{height:5px;background:#f3f4f6;border-radius:999px;overflow:hidden;margin-bottom:7px;}
+        #_cl_ut_icon_wrap.downloading{
+            background:linear-gradient(135deg,#dbeafe,#ede9fe);
+            color:#3b82f6;
+        }
+        #_cl_ut_icon_wrap.ready{
+            background:linear-gradient(135deg,#d1fae5,#a7f3d0);
+            color:#10b981;
+        }
+        #_cl_ut_title{
+            color:#111827;font-size:1.15rem;font-weight:800;
+            letter-spacing:-.025em;text-align:center;margin-bottom:4px;
+        }
+        #_cl_ut_version{
+            color:#6b7280;font-size:.82rem;text-align:center;margin-bottom:24px;
+        }
+        #_cl_ut_bar_track{
+            width:100%;height:8px;background:#f3f4f6;
+            border-radius:999px;overflow:hidden;margin-bottom:10px;
+        }
         #_cl_ut_bar_fill{
             height:100%;border-radius:999px;width:0%;
             background:linear-gradient(90deg,#3b82f6,#6366f1);
-            transition:width .5s ease,background .4s ease;
+            transition:width .6s ease,background .4s ease;
         }
-        #_cl_ut_bar_fill.done{background:linear-gradient(90deg,#10b981,#34d399);}
-        #_cl_ut_info{display:flex;align-items:center;justify-content:space-between;font-size:.75rem;color:#6b7280;}
-        #_cl_ut_label{font-weight:500;}
-        #_cl_ut_right{display:flex;align-items:center;gap:4px;}
-        #_cl_ut_pct{font-weight:700;color:#374151;font-variant-numeric:tabular-nums;}
-        #_cl_ut_size{color:#9ca3af;}
-        #_cl_ut_actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:10px;}
-        #_cl_ut_later{
-            background:none;border:none;padding:5px 8px;color:#9ca3af;
-            font-size:.75rem;cursor:pointer;font-family:inherit;
-            border-radius:7px;transition:color .15s,background .15s;line-height:1;
+        #_cl_ut_bar_fill.ready{background:linear-gradient(90deg,#10b981,#34d399);}
+        #_cl_ut_stats{
+            width:100%;display:flex;align-items:center;
+            justify-content:space-between;margin-bottom:20px;
         }
-        #_cl_ut_later:hover{color:#4b5563;background:#f9fafb;}
+        #_cl_ut_label{color:#6b7280;font-size:.8rem;font-weight:500;}
+        #_cl_ut_pct{
+            color:#374151;font-size:.8rem;font-weight:700;
+            font-variant-numeric:tabular-nums;
+        }
+        #_cl_ut_size{color:#9ca3af;font-size:.78rem;margin-top:4px;text-align:center;width:100%;}
+        #_cl_ut_notice{
+            color:#9ca3af;font-size:.75rem;text-align:center;
+            margin-bottom:20px;line-height:1.5;
+        }
         #_cl_ut_now{
+            width:100%;padding:13px;
             background:linear-gradient(135deg,#10b981,#34d399);
-            border:none;color:#fff;padding:6px 12px;
-            border-radius:8px;font-size:.77rem;font-weight:700;cursor:pointer;font-family:inherit;
-            box-shadow:0 2px 8px rgba(16,185,129,.3);
+            border:none;color:#fff;border-radius:12px;
+            font-size:.9rem;font-weight:700;cursor:pointer;font-family:inherit;
+            box-shadow:0 4px 16px rgba(16,185,129,.35);
             transition:filter .15s,transform .1s;
-            display:none;align-items:center;gap:6px;line-height:1;
+            display:none;align-items:center;justify-content:center;gap:8px;
         }
         #_cl_ut_now:hover{filter:brightness(1.07);transform:translateY(-1px);}
         #_cl_ut_now:active{transform:translateY(0);}
-        #_cl_ut_now:disabled{opacity:.7;cursor:not-allowed;transform:none;}
+        #_cl_ut_now:disabled{opacity:.7;cursor:not-allowed;transform:none;filter:none;}
     `
 
     const toastEl = document.createElement('div')
     toastEl.id = '_cl_update_toast'
     toastEl.innerHTML = `
-        <div id="_cl_ut_header">
-            <div id="_cl_ut_icon">${SVG_DOWNLOAD}</div>
-            <div>
-                <div id="_cl_ut_title">Mise à jour disponible</div>
-                <div id="_cl_ut_version"></div>
-            </div>
-        </div>
-        <div id="_cl_ut_bar_track"><div id="_cl_ut_bar_fill"></div></div>
-        <div id="_cl_ut_info">
-            <span id="_cl_ut_label">Téléchargement en cours…</span>
-            <span id="_cl_ut_right">
+        <div id="_cl_ut_card">
+            <div id="_cl_ut_icon_wrap" class="downloading">${SVG_DL_ICON}</div>
+            <div id="_cl_ut_title">Mise à jour disponible</div>
+            <div id="_cl_ut_version"></div>
+            <div id="_cl_ut_bar_track"><div id="_cl_ut_bar_fill"></div></div>
+            <div id="_cl_ut_stats">
+                <span id="_cl_ut_label">Téléchargement en cours…</span>
                 <span id="_cl_ut_pct">0%</span>
-                <span id="_cl_ut_size"></span>
-            </span>
-        </div>
-        <div id="_cl_ut_actions">
-            <button id="_cl_ut_later">Plus tard</button>
-            <button id="_cl_ut_now">${SVG_CHECK} Redémarrer maintenant</button>
+            </div>
+            <div id="_cl_ut_size"></div>
+            <div id="_cl_ut_notice">Veuillez patienter, ne fermez pas l'application.</div>
+            <button id="_cl_ut_now">${SVG_OK_ICON} Redémarrer maintenant</button>
         </div>
     `
 
     document.head.appendChild(styleEl)
     document.body.appendChild(toastEl)
 
-    const iconEl = document.getElementById('_cl_ut_icon')!
-    const titleEl = document.getElementById('_cl_ut_title')!
+    const iconWrap = document.getElementById('_cl_ut_icon_wrap')!
     const versionEl = document.getElementById('_cl_ut_version')!
     const barFill = document.getElementById('_cl_ut_bar_fill')!
     const labelEl = document.getElementById('_cl_ut_label')!
     const pctEl = document.getElementById('_cl_ut_pct')!
     const sizeEl = document.getElementById('_cl_ut_size')!
-    const laterBtn = document.getElementById('_cl_ut_later') as HTMLButtonElement
     const nowBtn = document.getElementById('_cl_ut_now') as HTMLButtonElement
 
-    let dismissed = false
     let countdownTimer: ReturnType<typeof setInterval> | null = null
 
-    function show(): void { toastEl.classList.add('ut-visible') }
-    function hide(): void { toastEl.classList.remove('ut-visible'); dismissed = true }
-
-    function formatMB(bytes: number): string {
-        return (bytes / 1048576).toFixed(1) + ' Mo'
-    }
+    function formatMB(bytes: number): string { return (bytes / 1048576).toFixed(1) + ' Mo' }
 
     function showAvailable(version: string): void {
-        if (dismissed) return
         versionEl.textContent = `Version ${version}`
         barFill.style.width = '0%'
         pctEl.textContent = '0%'
         sizeEl.textContent = ''
-        show()
+        toastEl.classList.add('ut-visible')
     }
 
     function setProgress(p: { percent: number; transferred: number; total: number }): void {
-        if (dismissed) return
         barFill.style.width = `${p.percent}%`
         pctEl.textContent = `${p.percent}%`
-        sizeEl.textContent = p.total > 0 ? `· ${formatMB(p.transferred)} / ${formatMB(p.total)}` : ''
-        if (!toastEl.classList.contains('ut-visible')) show()
+        sizeEl.textContent = p.total > 0 ? `${formatMB(p.transferred)} / ${formatMB(p.total)}` : ''
+        if (!toastEl.classList.contains('ut-visible')) toastEl.classList.add('ut-visible')
     }
 
     function showReady(version: string): void {
         if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
-        dismissed = false
-        iconEl.innerHTML = SVG_CHECK
-        iconEl.classList.add('done')
+        iconWrap.className = 'ready'
+        iconWrap.innerHTML = SVG_OK_ICON
         barFill.style.width = '100%'
-        barFill.classList.add('done')
-        titleEl.textContent = 'Prête à installer'
+        barFill.classList.add('ready')
         versionEl.textContent = `Version ${version}`
         sizeEl.textContent = ''
-        laterBtn.style.display = 'none'
         nowBtn.style.display = 'flex'
-        show()
+        toastEl.classList.add('ut-visible')
 
         let cd = 5
         labelEl.textContent = `Installation dans ${cd}s…`
@@ -861,7 +1043,6 @@ function injectUpdateToast(): void {
         }, 1000)
     }
 
-    laterBtn.addEventListener('click', hide)
     nowBtn.addEventListener('click', () => {
         if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
         labelEl.textContent = 'Installation en cours…'
@@ -880,4 +1061,137 @@ function injectUpdateToast(): void {
     _ut.showAvailable = showAvailable
     _ut.setProgress = setProgress
     _ut.showReady = showReady
+
+    // ── Update check modal ────────────────────────────────────────────────────
+
+    const SVG_SPINNER = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:_cl_um_spin .8s linear infinite"><circle cx="12" cy="12" r="10" stroke-opacity=".2"/><path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/></svg>`
+    const SVG_CHECK_LG = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+    const SVG_INFO = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="8"/><line x1="12" y1="12" x2="12" y2="16"/></svg>`
+
+    const mStyleEl = document.createElement('style')
+    mStyleEl.textContent = `
+        @keyframes _cl_um_spin{to{transform:rotate(360deg)}}
+        @keyframes _cl_um_fadein{from{opacity:0;transform:scale(.93)}to{opacity:1;transform:scale(1)}}
+        #_cl_update_modal{
+            font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
+            position:fixed;inset:0;z-index:2147483647;
+            background:rgba(15,23,42,.45);
+            backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+            display:none;align-items:center;justify-content:center;
+            box-sizing:border-box;
+        }
+        #_cl_update_modal.um-visible{display:flex;}
+        #_cl_um_card{
+            background:#fff;border-radius:20px;
+            padding:32px 28px 24px;
+            box-shadow:0 16px 56px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);
+            width:300px;max-width:calc(100vw - 40px);
+            display:flex;flex-direction:column;align-items:center;gap:0;
+            animation:_cl_um_fadein .25s cubic-bezier(.16,1,.3,1);
+            box-sizing:border-box;
+        }
+        #_cl_um_card *{box-sizing:border-box;}
+        #_cl_um_icon_wrap{
+            width:64px;height:64px;border-radius:50%;
+            display:flex;align-items:center;justify-content:center;
+            margin-bottom:16px;flex-shrink:0;
+            transition:background .3s ease,color .3s ease;
+        }
+        #_cl_um_icon_wrap.checking{background:#eff6ff;color:#3b82f6;}
+        #_cl_um_icon_wrap.ok{background:#f0fdf4;color:#22c55e;}
+        #_cl_um_icon_wrap.dev{background:#faf5ff;color:#8b5cf6;}
+        #_cl_um_title{
+            color:#111827;font-size:1.05rem;font-weight:800;
+            letter-spacing:-.02em;text-align:center;margin-bottom:6px;
+        }
+        #_cl_um_sub{
+            color:#6b7280;font-size:.82rem;text-align:center;
+            line-height:1.55;margin-bottom:0;
+        }
+        #_cl_um_meta{
+            margin-top:12px;padding:10px 14px;
+            background:#f9fafb;border-radius:10px;
+            width:100%;text-align:center;
+            color:#374151;font-size:.78rem;font-weight:500;
+            line-height:1.5;display:none;
+        }
+        #_cl_um_meta.visible{display:block;}
+        #_cl_um_meta span{color:#9ca3af;font-weight:400;}
+        #_cl_um_actions{display:flex;justify-content:flex-end;width:100%;margin-top:20px;}
+        #_cl_um_close{
+            background:linear-gradient(135deg,#3b82f6,#6366f1);
+            border:none;color:#fff;padding:9px 20px;
+            border-radius:10px;font-size:.83rem;font-weight:700;
+            cursor:pointer;font-family:inherit;
+            box-shadow:0 2px 10px rgba(59,130,246,.3);
+            transition:filter .15s,transform .1s;display:none;
+        }
+        #_cl_um_close.visible{display:block;}
+        #_cl_um_close:hover{filter:brightness(1.08);transform:translateY(-1px);}
+        #_cl_um_close:active{transform:translateY(0);}
+    `
+
+    const modalEl = document.createElement('div')
+    modalEl.id = '_cl_update_modal'
+    modalEl.innerHTML = `
+        <div id="_cl_um_card">
+            <div id="_cl_um_icon_wrap" class="checking">${SVG_SPINNER}</div>
+            <div id="_cl_um_title">Vérification…</div>
+            <div id="_cl_um_sub">Recherche d'une nouvelle version…</div>
+            <div id="_cl_um_meta"></div>
+            <div id="_cl_um_actions"><button id="_cl_um_close">Fermer</button></div>
+        </div>
+    `
+
+    document.head.appendChild(mStyleEl)
+    document.body.appendChild(modalEl)
+
+    const umIconWrap = document.getElementById('_cl_um_icon_wrap')!
+    const umTitle = document.getElementById('_cl_um_title')!
+    const umSub = document.getElementById('_cl_um_sub')!
+    const umMeta = document.getElementById('_cl_um_meta')!
+    const umClose = document.getElementById('_cl_um_close') as HTMLButtonElement
+
+    function showModal(): void {
+        umIconWrap.className = 'checking'
+        umIconWrap.innerHTML = SVG_SPINNER
+        umTitle.textContent = 'Vérification…'
+        umSub.textContent = 'Recherche d\'une nouvelle version…'
+        umMeta.classList.remove('visible')
+        umClose.classList.remove('visible')
+        modalEl.classList.add('um-visible')
+    }
+
+    function setModalResult(type: 'up-to-date' | 'dev', version?: string): void {
+        if (!modalEl.classList.contains('um-visible')) return
+        if (type === 'up-to-date' && version) {
+            umIconWrap.className = 'ok'
+            umIconWrap.innerHTML = SVG_CHECK_LG
+            umTitle.textContent = 'Vous êtes à jour'
+            umSub.textContent = 'CielooPos est à jour.'
+            const now = new Date()
+            const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+            const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+            umMeta.innerHTML = `Version <strong>${version}</strong> &nbsp;·&nbsp; <span>Vérifié le ${dateStr} à ${timeStr}</span>`
+            umMeta.classList.add('visible')
+            umClose.classList.add('visible')
+        } else if (type === 'up-to-date' && !version) {
+            // update-available fired → close modal silently
+            modalEl.classList.remove('um-visible')
+        } else if (type === 'dev') {
+            umIconWrap.className = 'dev'
+            umIconWrap.innerHTML = SVG_INFO
+            umTitle.textContent = 'Mode développement'
+            umSub.textContent = 'Les mises à jour sont désactivées en mode développement.'
+            umClose.classList.add('visible')
+        }
+    }
+
+    modalEl.addEventListener('click', (e) => {
+        if (e.target === modalEl) modalEl.classList.remove('um-visible')
+    })
+    umClose.addEventListener('click', () => modalEl.classList.remove('um-visible'))
+
+    _ut.showCheckModal = showModal
+    _ut.setCheckResult = setModalResult
 }

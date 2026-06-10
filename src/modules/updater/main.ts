@@ -1,15 +1,16 @@
 import { autoUpdater, AppUpdater } from 'electron-updater'
 import { ipcMain, BrowserWindow, app } from 'electron'
+import fs from 'fs'
+import path from 'path'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 autoUpdater.autoDownload = true
 autoUpdater.autoInstallOnAppQuit = true
 
-// In dev, electron-updater needs a published version to work — disable silently.
 const isPackaged = app.isPackaged
 
-// ─── Silent check on startup ──────────────────────────────────────────────────
+// ─── Init ─────────────────────────────────────────────────────────────────────
 
 export function initAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
     if (!isPackaged) return
@@ -24,12 +25,9 @@ export function initAutoUpdater(getMainWindow: () => BrowserWindow | null): void
     })
 
     autoUpdater.on('update-not-available', () => {
-        // Notify renderer only if a manual check was triggered (see flag below)
-        if (_manualCheckPending) {
-            _manualCheckPending = false
-            const win = getMainWindow()
-            win?.webContents.send('updater:up-to-date', { version: app.getVersion() })
-        }
+        _manualCheckPending = false
+        const win = getMainWindow()
+        win?.webContents.send('updater:up-to-date', { version: app.getVersion() })
     })
 
     autoUpdater.on('download-progress', (progress) => {
@@ -47,27 +45,29 @@ export function initAutoUpdater(getMainWindow: () => BrowserWindow | null): void
             autoUpdater.quitAndInstall(false, true)
             return
         }
-        // Let the renderer show the UI countdown — it will call updater:install-now
         win.webContents.send('updater:update-downloaded', { version: info.version })
     })
 
     autoUpdater.on('error', (err) => {
+        const win = getMainWindow()
         if (_manualCheckPending) {
             _manualCheckPending = false
-            const win = getMainWindow()
             win?.webContents.send('updater:error', { message: err.message })
         }
-        // Silently log automatic background errors
+        // Signal splash to not wait forever on error
+        win?.webContents.send('updater:up-to-date', { version: app.getVersion() })
         console.error('[updater]', err.message)
     })
 
-    // Silent background check 10 seconds after startup
+    // Check 2 seconds after startup — send check-started so the splash can sync
     setTimeout(() => {
+        const win = getMainWindow()
+        win?.webContents.send('updater:check-started')
         void (autoUpdater as AppUpdater).checkForUpdates()
-    }, 10_000)
+    }, 2_000)
 }
 
-// ─── IPC: manual check triggered from the menu ────────────────────────────────
+// ─── IPC ──────────────────────────────────────────────────────────────────────
 
 let _manualCheckPending = false
 
@@ -83,5 +83,17 @@ export function registerUpdaterIpc(): void {
 
     ipcMain.handle('updater:install-now', () => {
         autoUpdater.quitAndInstall(false, true)
+    })
+
+    ipcMain.handle('app:icon-url', () => {
+        const iconPath = app.isPackaged
+            ? path.join(process.resourcesPath, 'assets/img/512_rounded.png')
+            : path.join(app.getAppPath(), 'assets/img/512_rounded.png')
+        try {
+            const data = fs.readFileSync(iconPath)
+            return `data:image/png;base64,${data.toString('base64')}`
+        } catch {
+            return null
+        }
     })
 }
