@@ -85,6 +85,11 @@ contextBridge.exposeInMainWorld('cieloo', {
         isDev: (): Promise<boolean> => ipcRenderer.invoke('app:is-dev'),
     },
 
+    device: {
+        getNetworkInfo: (): Promise<{ mac: string; ip: string }> =>
+            ipcRenderer.invoke('device:get-network-info'),
+    },
+
     updater: {
         check: (): Promise<{ status: 'checking' | 'dev' }> =>
             ipcRenderer.invoke('updater:check'),

@@ -54,6 +54,9 @@ declare global {
                 version: () => Promise<string>
                 isDev: () => Promise<boolean>
             }
+            device: {
+                getNetworkInfo: () => Promise<{ mac: string; ip: string }>
+            }
         }
     }
 }

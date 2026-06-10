@@ -1054,6 +1054,8 @@ function registerIpc(): void {
         } else {
             void mainWindow?.loadFile(path.join(__dirname, '../renderer/index.html'))
         }
+        mainWindow?.show()
+        mainWindow?.focus()
     })
 
     ipcMain.handle('dev:reset-config', () => {

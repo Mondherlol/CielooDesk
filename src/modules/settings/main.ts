@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import os from 'node:os'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,8 @@ export interface AppSettings {
     shortcuts: ShortcutMap
     print: PrintSettings
     requirePrinter: boolean
+    serialNumber: string
+    terminalName: string
 }
 
 export const DEFAULT_SHORTCUTS: ShortcutMap = {
@@ -59,6 +62,8 @@ const DEFAULTS: AppSettings = {
     spinnerPosition: 'bottom-left',
     shortcuts: { ...DEFAULT_SHORTCUTS },
     requirePrinter: false,
+    serialNumber: '',
+    terminalName: '',
     print: {
         enabled: true,
         port: 9100,
@@ -149,6 +154,40 @@ export function setPrintSettings(print: Partial<PrintSettings>): AppSettings {
         ...current,
         print: normalizePrintSettings({ ...current.print, ...print }),
     }))
+}
+
+// ─── Device info ─────────────────────────────────────────────────────────────
+
+export function getNetworkInfo(): { mac: string; ip: string } {
+    const ifaces = os.networkInterfaces()
+    let mac = '—'
+    let ip = '—'
+
+    // Ethernet interface names on Windows: "Ethernet", "Local Area Connection", etc.
+    const isEthernet = (name: string) => /^(ethernet|local area connection|eth\d*)/i.test(name)
+
+    const entries = Object.entries(ifaces)
+    // Prioritise Ethernet interfaces, then fall back to any non-internal interface
+    const sorted = [
+        ...entries.filter(([name]) => isEthernet(name)),
+        ...entries.filter(([name]) => !isEthernet(name)),
+    ]
+
+    for (const [, addrs] of sorted) {
+        if (!addrs) continue
+        for (const addr of addrs) {
+            if (addr.internal) continue
+            if (mac === '—' && addr.mac && addr.mac !== '00:00:00:00:00:00') {
+                mac = addr.mac
+            }
+            if (ip === '—' && addr.family === 'IPv4') {
+                ip = addr.address
+            }
+        }
+        if (mac !== '—' && ip !== '—') break
+    }
+
+    return { mac, ip }
 }
 
 // ─── Settings window ──────────────────────────────────────────────────────────
@@ -248,6 +287,8 @@ export function registerSettingsIpc(
     })
 
     ipcMain.handle('settings:open', () => openSettingsWindow(isDev, rendererUrl))
+
+    ipcMain.handle('device:get-network-info', () => getNetworkInfo())
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────

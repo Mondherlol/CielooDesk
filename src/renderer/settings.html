@@ -32,6 +32,9 @@
     <button class="sidebar-item" data-tab="raccourcis">
       <i data-lucide="keyboard" class="sidebar-item-icon"></i> Raccourcis
     </button>
+    <button class="sidebar-item" data-tab="device">
+      <i data-lucide="hard-drive" class="sidebar-item-icon"></i> Terminal
+    </button>
 
     <div class="sidebar-version" id="sidebar-version">V. 0.1</div>
 
@@ -187,6 +190,51 @@
         <button class="btn btn-default" id="btn-reset-shortcuts">
           Réinitialiser tous les raccourcis
         </button>
+      </div>
+    </div>
+
+    <!-- ── Tab: Terminal (Device) ───────────────────────────────────────────── -->
+    <div id="tab-device" class="settings-tab">
+      <h2 class="tab-title">Terminal</h2>
+
+      <div class="section">
+        <p class="section-title">Identification</p>
+
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info">
+            <span class="setting-label">Numéro de série</span>
+            <span class="setting-desc">Identifiant unique de ce terminal</span>
+          </div>
+          <input type="text" class="setting-input" id="input-serial-number" placeholder="Ex. SN-000001" />
+        </div>
+
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info">
+            <span class="setting-label">Nom du terminal</span>
+            <span class="setting-desc">Nom affiché pour identifier cette caisse</span>
+          </div>
+          <input type="text" class="setting-input" id="input-terminal-name" placeholder="Ex. Caisse 1" />
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Réseau</p>
+
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info">
+            <span class="setting-label">Adresse MAC</span>
+            <span class="setting-desc">Adresse physique de l'interface réseau active</span>
+          </div>
+          <input type="text" class="setting-input setting-input--readonly" id="input-mac" readonly />
+        </div>
+
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info">
+            <span class="setting-label">Adresse IP</span>
+            <span class="setting-desc">Adresse IP locale de ce terminal</span>
+          </div>
+          <input type="text" class="setting-input setting-input--readonly" id="input-ip" readonly />
+        </div>
       </div>
     </div>
 

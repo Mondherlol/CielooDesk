@@ -360,6 +360,19 @@ body {
     border-color: var(--accent);
 }
 
+.setting-input--readonly {
+    color: var(--muted);
+    background: var(--sidebar-bg);
+    cursor: default;
+    border-style: dashed;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: .82rem;
+}
+
+.setting-input--readonly:focus {
+    border-color: var(--border);
+}
+
 .setting-control-row {
     display: flex;
     align-items: center;

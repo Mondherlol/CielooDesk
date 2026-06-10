@@ -1,5 +1,5 @@
 import './styles/settings.css'
-import { createIcons, Palette, KeyRound, Rocket, Keyboard } from 'lucide'
+import { createIcons, Palette, KeyRound, Rocket, Keyboard, HardDrive } from 'lucide'
 import type { AppSettings, ShortcutMap } from '../../modules/settings/main'
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ function initDevMenu(): void {
         clearConfigBtn.disabled = true
         try {
             await window.cieloo.config.clear()
-            toast('Configuration effacée')
+            window.close()
         } finally {
             clearConfigBtn.disabled = false
         }
@@ -243,7 +243,7 @@ async function refreshCredsStatus(): Promise<void> {
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function init(): Promise<void> {
-    createIcons({ icons: { Palette, KeyRound, Rocket, Keyboard } })
+    createIcons({ icons: { Palette, KeyRound, Rocket, Keyboard, HardDrive } })
     initTabs()
     initDevMenu()
 
@@ -269,6 +269,13 @@ async function init(): Promise<void> {
 
     // Raccourcis
     renderShortcuts(settings.shortcuts, isDev)
+
+    // Device
+    ;(document.getElementById('input-serial-number') as HTMLInputElement).value = settings.serialNumber ?? ''
+    ;(document.getElementById('input-terminal-name') as HTMLInputElement).value = settings.terminalName ?? ''
+    const networkInfo = await window.cieloo.device.getNetworkInfo()
+    ;(document.getElementById('input-mac') as HTMLInputElement).value = networkInfo.mac
+    ;(document.getElementById('input-ip') as HTMLInputElement).value = networkInfo.ip
 
     // ── Wire controls ────────────────────────────────────────────────────────
 
@@ -314,6 +321,17 @@ async function init(): Promise<void> {
         renderShortcuts(updated.shortcuts, isDev)
         toast('Raccourcis réinitialisés')
     })
+
+    function wireTextInput(id: string, key: keyof AppSettings, label: string): void {
+        const el = document.getElementById(id) as HTMLInputElement
+        el.addEventListener('change', async () => {
+            await window.cieloo.settings.set(key as string, el.value.trim())
+            toast(`${label} enregistré`)
+        })
+    }
+
+    wireTextInput('input-serial-number', 'serialNumber', 'Numéro de série')
+    wireTextInput('input-terminal-name', 'terminalName', 'Nom du terminal')
 }
 
 void init()
