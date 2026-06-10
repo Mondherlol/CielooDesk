@@ -270,12 +270,12 @@ async function init(): Promise<void> {
     // Raccourcis
     renderShortcuts(settings.shortcuts, isDev)
 
-    // Device
-    ;(document.getElementById('input-serial-number') as HTMLInputElement).value = settings.serialNumber ?? ''
-    ;(document.getElementById('input-terminal-name') as HTMLInputElement).value = settings.terminalName ?? ''
+        // Device
+        ; (document.getElementById('input-serial-number') as HTMLInputElement).value = settings.serialNumber ?? ''
+        ; (document.getElementById('input-terminal-name') as HTMLInputElement).value = settings.terminalName ?? ''
     const networkInfo = await window.cieloo.device.getNetworkInfo()
-    ;(document.getElementById('input-mac') as HTMLInputElement).value = networkInfo.mac
-    ;(document.getElementById('input-ip') as HTMLInputElement).value = networkInfo.ip
+        ; (document.getElementById('input-mac') as HTMLInputElement).value = networkInfo.mac
+        ; (document.getElementById('input-ip') as HTMLInputElement).value = networkInfo.ip
 
     // ── Wire controls ────────────────────────────────────────────────────────
 
@@ -331,7 +331,7 @@ async function init(): Promise<void> {
     }
 
     wireTextInput('input-serial-number', 'serialNumber', 'Numéro de série')
-    wireTextInput('input-terminal-name', 'terminalName', 'Nom du terminal')
+    // input-terminal-name est en lecture seule : mis à jour automatiquement depuis CielooPOS
 }
 
 void init()

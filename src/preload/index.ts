@@ -107,6 +107,9 @@ contextBridge.exposeInMainWorld('cieloo', {
         onCheckRequested: (cb: () => void) => {
             ipcRenderer.on('updater:check-requested', () => cb())
         },
+        onUpdateDownloaded: (cb: (info: { version: string }) => void) => {
+            ipcRenderer.on('updater:update-downloaded', (_e, info) => cb(info))
+        },
     }
 
 })
@@ -123,6 +126,37 @@ let _triggerOfflineOverlay: (() => void) | null = null
 
 ipcRenderer.on('net:offline', () => {
     _triggerOfflineOverlay?.()
+})
+
+// ─── Update toast state (persists across page navigations) ───────────────────
+// IPC events can arrive before a page's DOM is ready; we cache the last known
+// state here so the toast can restore itself after each SPA/full navigation.
+// Handlers live on an object (not bare let-vars) so TypeScript doesn't
+// over-narrow them to `null` before injectUpdateToast() has wired them up.
+
+let _pendingUpdateVersion: string | null = null
+let _pendingProgress: { percent: number; transferred: number; total: number } | null = null
+let _downloadedVersion: string | null = null
+
+const _ut = {
+    showAvailable: null as ((version: string) => void) | null,
+    setProgress: null as ((p: { percent: number; transferred: number; total: number }) => void) | null,
+    showReady: null as ((version: string) => void) | null,
+}
+
+ipcRenderer.on('updater:update-available', (_e: unknown, info: { version: string }) => {
+    _pendingUpdateVersion = info.version
+    _ut.showAvailable?.(info.version)
+})
+ipcRenderer.on('updater:download-progress', (_e: unknown, p: { percent: number; transferred: number; total: number }) => {
+    _pendingProgress = p
+    _ut.setProgress?.(p)
+})
+ipcRenderer.on('updater:update-downloaded', (_e: unknown, info: { version: string }) => {
+    _downloadedVersion = info.version
+    _pendingUpdateVersion = null
+    _pendingProgress = null
+    _ut.showReady?.(info.version)
 })
 
 // Printer config saved or setting changed → re-check immediately (no polling needed)
@@ -170,6 +204,7 @@ function isSettingsPage(): boolean {
 
 function runInjections(): void {
     if (isSettingsPage()) return
+    injectUpdateToast()
     if (isExternalPage()) injectOverlays()
 }
 
@@ -667,4 +702,182 @@ function showPrinterToast(configured: boolean, connected: boolean): void {
         toast.remove()
         styleEl.remove()
     })
+}
+
+// ─── Update toast ─────────────────────────────────────────────────────────────
+
+function injectUpdateToast(): void {
+    if (document.getElementById('_cl_update_toast')) return
+
+    const SVG_DOWNLOAD = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`
+    const SVG_CHECK = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+
+    const styleEl = document.createElement('style')
+    styleEl.textContent = `
+        #_cl_update_toast *{box-sizing:border-box;}
+        #_cl_update_toast{
+            font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
+            position:fixed;bottom:20px;right:20px;z-index:2147483646;
+            background:#fff;border-radius:16px;padding:16px 18px 14px;
+            box-shadow:0 8px 32px rgba(0,0,0,.14),0 2px 8px rgba(0,0,0,.06),inset 0 0 0 1px rgba(0,0,0,.05);
+            width:296px;max-width:calc(100vw - 40px);
+            pointer-events:none;opacity:0;
+            transform:translateY(16px) scale(.97);
+            transition:transform .35s cubic-bezier(.16,1,.3,1),opacity .3s ease;
+        }
+        #_cl_update_toast.ut-visible{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}
+        #_cl_ut_header{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+        #_cl_ut_icon{
+            width:34px;height:34px;border-radius:10px;flex-shrink:0;
+            display:flex;align-items:center;justify-content:center;
+            background:linear-gradient(135deg,#3b82f6 0%,#6366f1 100%);
+            color:#fff;transition:background .4s ease;
+        }
+        #_cl_ut_icon.done{background:linear-gradient(135deg,#10b981 0%,#34d399 100%);}
+        #_cl_ut_title{color:#111827;font-size:.875rem;font-weight:700;letter-spacing:-.015em;line-height:1.2;}
+        #_cl_ut_version{color:#9ca3af;font-size:.73rem;margin-top:2px;}
+        #_cl_ut_bar_track{height:5px;background:#f3f4f6;border-radius:999px;overflow:hidden;margin-bottom:7px;}
+        #_cl_ut_bar_fill{
+            height:100%;border-radius:999px;width:0%;
+            background:linear-gradient(90deg,#3b82f6,#6366f1);
+            transition:width .5s ease,background .4s ease;
+        }
+        #_cl_ut_bar_fill.done{background:linear-gradient(90deg,#10b981,#34d399);}
+        #_cl_ut_info{display:flex;align-items:center;justify-content:space-between;font-size:.75rem;color:#6b7280;}
+        #_cl_ut_label{font-weight:500;}
+        #_cl_ut_right{display:flex;align-items:center;gap:4px;}
+        #_cl_ut_pct{font-weight:700;color:#374151;font-variant-numeric:tabular-nums;}
+        #_cl_ut_size{color:#9ca3af;}
+        #_cl_ut_actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:10px;}
+        #_cl_ut_later{
+            background:none;border:none;padding:5px 8px;color:#9ca3af;
+            font-size:.75rem;cursor:pointer;font-family:inherit;
+            border-radius:7px;transition:color .15s,background .15s;line-height:1;
+        }
+        #_cl_ut_later:hover{color:#4b5563;background:#f9fafb;}
+        #_cl_ut_now{
+            background:linear-gradient(135deg,#10b981,#34d399);
+            border:none;color:#fff;padding:6px 12px;
+            border-radius:8px;font-size:.77rem;font-weight:700;cursor:pointer;font-family:inherit;
+            box-shadow:0 2px 8px rgba(16,185,129,.3);
+            transition:filter .15s,transform .1s;
+            display:none;align-items:center;gap:6px;line-height:1;
+        }
+        #_cl_ut_now:hover{filter:brightness(1.07);transform:translateY(-1px);}
+        #_cl_ut_now:active{transform:translateY(0);}
+        #_cl_ut_now:disabled{opacity:.7;cursor:not-allowed;transform:none;}
+    `
+
+    const toastEl = document.createElement('div')
+    toastEl.id = '_cl_update_toast'
+    toastEl.innerHTML = `
+        <div id="_cl_ut_header">
+            <div id="_cl_ut_icon">${SVG_DOWNLOAD}</div>
+            <div>
+                <div id="_cl_ut_title">Mise à jour disponible</div>
+                <div id="_cl_ut_version"></div>
+            </div>
+        </div>
+        <div id="_cl_ut_bar_track"><div id="_cl_ut_bar_fill"></div></div>
+        <div id="_cl_ut_info">
+            <span id="_cl_ut_label">Téléchargement en cours…</span>
+            <span id="_cl_ut_right">
+                <span id="_cl_ut_pct">0%</span>
+                <span id="_cl_ut_size"></span>
+            </span>
+        </div>
+        <div id="_cl_ut_actions">
+            <button id="_cl_ut_later">Plus tard</button>
+            <button id="_cl_ut_now">${SVG_CHECK} Redémarrer maintenant</button>
+        </div>
+    `
+
+    document.head.appendChild(styleEl)
+    document.body.appendChild(toastEl)
+
+    const iconEl = document.getElementById('_cl_ut_icon')!
+    const titleEl = document.getElementById('_cl_ut_title')!
+    const versionEl = document.getElementById('_cl_ut_version')!
+    const barFill = document.getElementById('_cl_ut_bar_fill')!
+    const labelEl = document.getElementById('_cl_ut_label')!
+    const pctEl = document.getElementById('_cl_ut_pct')!
+    const sizeEl = document.getElementById('_cl_ut_size')!
+    const laterBtn = document.getElementById('_cl_ut_later') as HTMLButtonElement
+    const nowBtn = document.getElementById('_cl_ut_now') as HTMLButtonElement
+
+    let dismissed = false
+    let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+    function show(): void { toastEl.classList.add('ut-visible') }
+    function hide(): void { toastEl.classList.remove('ut-visible'); dismissed = true }
+
+    function formatMB(bytes: number): string {
+        return (bytes / 1048576).toFixed(1) + ' Mo'
+    }
+
+    function showAvailable(version: string): void {
+        if (dismissed) return
+        versionEl.textContent = `Version ${version}`
+        barFill.style.width = '0%'
+        pctEl.textContent = '0%'
+        sizeEl.textContent = ''
+        show()
+    }
+
+    function setProgress(p: { percent: number; transferred: number; total: number }): void {
+        if (dismissed) return
+        barFill.style.width = `${p.percent}%`
+        pctEl.textContent = `${p.percent}%`
+        sizeEl.textContent = p.total > 0 ? `· ${formatMB(p.transferred)} / ${formatMB(p.total)}` : ''
+        if (!toastEl.classList.contains('ut-visible')) show()
+    }
+
+    function showReady(version: string): void {
+        if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+        dismissed = false
+        iconEl.innerHTML = SVG_CHECK
+        iconEl.classList.add('done')
+        barFill.style.width = '100%'
+        barFill.classList.add('done')
+        titleEl.textContent = 'Prête à installer'
+        versionEl.textContent = `Version ${version}`
+        sizeEl.textContent = ''
+        laterBtn.style.display = 'none'
+        nowBtn.style.display = 'flex'
+        show()
+
+        let cd = 5
+        labelEl.textContent = `Installation dans ${cd}s…`
+        countdownTimer = setInterval(() => {
+            cd--
+            if (cd <= 0) {
+                if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+                labelEl.textContent = 'Installation en cours…'
+                nowBtn.disabled = true
+                void ipcRenderer.invoke('updater:install-now')
+            } else {
+                labelEl.textContent = `Installation dans ${cd}s…`
+            }
+        }, 1000)
+    }
+
+    laterBtn.addEventListener('click', hide)
+    nowBtn.addEventListener('click', () => {
+        if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+        labelEl.textContent = 'Installation en cours…'
+        nowBtn.disabled = true
+        void ipcRenderer.invoke('updater:install-now')
+    })
+
+    // Restore state persisted before this page's DOM was loaded
+    if (_downloadedVersion) {
+        showReady(_downloadedVersion)
+    } else if (_pendingUpdateVersion) {
+        showAvailable(_pendingUpdateVersion)
+        if (_pendingProgress) setProgress(_pendingProgress)
+    }
+
+    _ut.showAvailable = showAvailable
+    _ut.setProgress = setProgress
+    _ut.showReady = showReady
 }

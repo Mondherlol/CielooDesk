@@ -1,5 +1,5 @@
 import { autoUpdater, AppUpdater } from 'electron-updater'
-import { ipcMain, dialog, BrowserWindow, app } from 'electron'
+import { ipcMain, BrowserWindow, app } from 'electron'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -47,29 +47,15 @@ export function initAutoUpdater(getMainWindow: () => BrowserWindow | null): void
             autoUpdater.quitAndInstall(false, true)
             return
         }
-
-        void dialog.showMessageBox(win, {
-            type: 'info',
-            title: 'Mise à jour disponible',
-            message: `CielooDesk ${info.version} est prêt à être installé.`,
-            detail: 'La mise à jour sera installée au prochain redémarrage.\nVoulez-vous redémarrer maintenant ?',
-            buttons: ['Redémarrer maintenant', 'Plus tard'],
-            defaultId: 0,
-            cancelId: 1,
-            icon: undefined,
-        }).then(({ response }) => {
-            if (response === 0) autoUpdater.quitAndInstall(false, true)
-        })
+        // Let the renderer show the UI countdown — it will call updater:install-now
+        win.webContents.send('updater:update-downloaded', { version: info.version })
     })
 
     autoUpdater.on('error', (err) => {
         if (_manualCheckPending) {
             _manualCheckPending = false
             const win = getMainWindow()
-            void dialog.showErrorBox(
-                'Vérification des mises à jour',
-                `Impossible de vérifier les mises à jour.\n\n${err.message}`
-            )
+            win?.webContents.send('updater:error', { message: err.message })
         }
         // Silently log automatic background errors
         console.error('[updater]', err.message)
