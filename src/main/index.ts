@@ -1195,6 +1195,13 @@ function registerIpc(): void {
 
     ipcMain.handle('app:version', () => app.getVersion())
     ipcMain.handle('app:is-dev', () => isDev)
+
+    let splashClaimed = false
+    ipcMain.handle('app:claim-splash', () => {
+        if (splashClaimed) return false
+        splashClaimed = true
+        return true
+    })
     ipcMain.handle('second-display:open-settings', () => {
         openSecondDisplaySettingsWindow()
     })

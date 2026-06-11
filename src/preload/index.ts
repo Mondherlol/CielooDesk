@@ -726,11 +726,11 @@ function showPrinterToast(configured: boolean, connected: boolean): void {
 
 // ─── Startup splash ───────────────────────────────────────────────────────────
 
-function injectSplash(): void {
+async function injectSplash(): Promise<void> {
     if (_splashShown) return
-    if (sessionStorage.getItem('_cl_splash_shown')) return
+    const granted = await ipcRenderer.invoke('app:claim-splash') as boolean
+    if (!granted) return
     _splashShown = true
-    sessionStorage.setItem('_cl_splash_shown', '1')
 
     const SVG_CHECK = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
 
