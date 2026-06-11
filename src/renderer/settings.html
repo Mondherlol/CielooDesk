@@ -39,8 +39,15 @@
     <div class="sidebar-version" id="sidebar-version">V. 0.1</div>
 
     <div class="dev-menu" id="dev-menu" aria-hidden="true">
-      <p class="dev-menu-title">Menu développeur</p>
-      <button class="btn btn-ghost" id="btn-dev-clear-config">Effacer config</button>
+      <p class="dev-menu-title">Options avancées</p>
+      <div class="dev-menu-row">
+        <div class="dev-menu-row-label">
+          <span>Instance libre</span>
+          <span class="dev-menu-row-hint">Désactive l'ajout automatique de .cieloo.io</span>
+        </div>
+        <button class="dev-toggle" id="btn-free-instance" role="switch" aria-checked="false"></button>
+      </div>
+      <button class="btn btn-ghost btn-ghost-danger" id="btn-dev-clear-config">Effacer config</button>
     </div>
   </nav>
 

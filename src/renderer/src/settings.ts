@@ -32,7 +32,8 @@ function initDevMenu(): void {
     const versionEl = document.getElementById('sidebar-version')
     const devMenuEl = document.getElementById('dev-menu')
     const clearConfigBtn = document.getElementById('btn-dev-clear-config') as HTMLButtonElement | null
-    if (!versionEl || !devMenuEl || !clearConfigBtn) return
+    const freeInstanceBtn = document.getElementById('btn-free-instance') as HTMLButtonElement | null
+    if (!versionEl || !devMenuEl || !clearConfigBtn || !freeInstanceBtn) return
 
     let tapCount = 0
     let tapTimer: ReturnType<typeof setTimeout> | null = null
@@ -57,8 +58,25 @@ function initDevMenu(): void {
 
         const isVisible = devMenuEl.classList.toggle('visible')
         devMenuEl.setAttribute('aria-hidden', String(!isVisible))
-        toast(isVisible ? 'Menu développeur activé' : 'Menu développeur masqué')
+        toast(isVisible ? 'Options avancées activées' : 'Options avancées masquées')
         resetTapState()
+    })
+
+    // Load current free instance state
+    void window.cieloo.config.get().then(config => {
+        const checked = config.freeInstance ?? false
+        freeInstanceBtn.setAttribute('aria-checked', String(checked))
+    })
+
+    freeInstanceBtn.addEventListener('click', async () => {
+        freeInstanceBtn.disabled = true
+        try {
+            const newState = await window.cieloo.config.toggleFreeInstance()
+            freeInstanceBtn.setAttribute('aria-checked', String(newState))
+            toast(newState ? 'Instance libre activée' : 'Instance libre désactivée')
+        } finally {
+            freeInstanceBtn.disabled = false
+        }
     })
 
     clearConfigBtn.addEventListener('click', async () => {

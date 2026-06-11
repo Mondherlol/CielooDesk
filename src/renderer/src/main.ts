@@ -8,6 +8,12 @@ const btnLabel = document.getElementById('btn-label') as HTMLSpanElement
 const btnArrow = document.getElementById('btn-arrow') as HTMLSpanElement
 const btnSpinner = document.getElementById('btn-spinner') as HTMLSpanElement
 const fieldInner = input.closest('.field-inner') as HTMLDivElement
+const fieldSuffix = document.getElementById('field-suffix') as HTMLSpanElement
+const fieldLabel = document.getElementById('field-label') as HTMLLabelElement
+const setupSub = document.getElementById('setup-sub') as HTMLParagraphElement
+const setupFooter = document.getElementById('setup-footer') as HTMLParagraphElement
+
+let isFreeInstance = false
 
 function setLoading(loading: boolean): void {
     submitBtn.disabled = loading
@@ -60,16 +66,24 @@ form.addEventListener('submit', async (e) => {
     const raw = input.value.trim()
 
     if (!raw) {
-        setError('Veuillez saisir un nom d\'instance.')
+        setError(isFreeInstance ? 'Veuillez saisir une URL.' : 'Veuillez saisir un nom d\'instance.')
         input.focus()
         return
     }
 
-    // Only allow lowercase letters, numbers and hyphens
-    if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(raw) && !/^[a-z0-9]$/.test(raw)) {
-        setError('Caractères autorisés : lettres minuscules, chiffres, tirets.')
-        input.focus()
-        return
+    if (isFreeInstance) {
+        try { new URL(raw) } catch {
+            setError('URL invalide. Exemple : http://localhost:3000')
+            input.focus()
+            return
+        }
+    } else {
+        // Only allow lowercase letters, numbers and hyphens
+        if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(raw) && !/^[a-z0-9]$/.test(raw)) {
+            setError('Caractères autorisés : lettres minuscules, chiffres, tirets.')
+            input.focus()
+            return
+        }
     }
 
     setLoading(true)
@@ -85,6 +99,16 @@ form.addEventListener('submit', async (e) => {
 
 // Auto-focus
 input.focus()
+
+void window.cieloo.config.get().then(config => {
+    if (!config.freeInstance) return
+    isFreeInstance = true
+    fieldSuffix.style.display = 'none'
+    fieldLabel.textContent = 'URL de l\'instance'
+    input.placeholder = 'http://localhost:3000'
+    setupSub.textContent = 'Entrez l\'URL complète de votre instance pour démarrer.'
+    setupFooter.style.display = 'none'
+}).catch(() => { /* garder l'UI par défaut */ })
 
 void prefillInstance().catch(() => {
     // Non-blocking: manual entry remains available if auto-detection fails.

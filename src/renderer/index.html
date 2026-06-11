@@ -24,14 +24,14 @@
 
         <!-- Heading -->
         <h1 class="setup-title">Configuration de la caisse</h1>
-        <p class="setup-sub">
+        <p class="setup-sub" id="setup-sub">
           Entrez le nom de votre instance Cieloo pour démarrer.
         </p>
 
         <!-- Form -->
         <form class="setup-form" id="setup-form" autocomplete="off">
           <div class="field-wrap">
-            <label class="field-label" for="instance-input">
+            <label class="field-label" id="field-label" for="instance-input">
               Nom de l'instance
             </label>
             <div class="field-inner">
@@ -43,9 +43,9 @@
                 spellcheck="false"
                 autocorrect="off"
                 autocapitalize="none"
-                maxlength="64"
+                maxlength="256"
               />
-              <span class="field-suffix">.cieloo.io</span>
+              <span class="field-suffix" id="field-suffix">.cieloo.io</span>
             </div>
             <p class="field-hint" id="field-hint"></p>
           </div>
@@ -57,7 +57,7 @@
           </button>
         </form>
 
-        <p class="setup-footer">
+        <p class="setup-footer" id="setup-footer">
           L'application restera verrouillée sur <strong>*.cieloo.io</strong>
         </p>
       </div>

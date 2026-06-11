@@ -8,9 +8,10 @@ declare global {
     interface Window {
         cieloo: {
             config: {
-                get: () => Promise<{ instance?: string }>
+                get: () => Promise<{ instance?: string; freeInstance?: boolean }>
                 getBootstrapInstance: () => Promise<{ instance: string; source: 'clipboard' | 'exe' } | null>
                 saveInstance: (instance: string) => Promise<void>
+                toggleFreeInstance: () => Promise<boolean>
                 clear: () => Promise<void>
             }
             autoLogin: {

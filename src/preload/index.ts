@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('cieloo', {
             ipcRenderer.invoke('config:get-bootstrap-instance'),
         saveInstance: (instance: string): Promise<void> =>
             ipcRenderer.invoke('config:save-instance', instance),
+        toggleFreeInstance: (): Promise<boolean> =>
+            ipcRenderer.invoke('config:toggle-free-instance'),
         clear: (): Promise<void> =>
             ipcRenderer.invoke('config:clear')
     },
@@ -726,7 +728,9 @@ function showPrinterToast(configured: boolean, connected: boolean): void {
 
 function injectSplash(): void {
     if (_splashShown) return
+    if (sessionStorage.getItem('_cl_splash_shown')) return
     _splashShown = true
+    sessionStorage.setItem('_cl_splash_shown', '1')
 
     const SVG_CHECK = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
 

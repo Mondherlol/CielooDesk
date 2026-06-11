@@ -23,7 +23,7 @@ const isDev = !app.isPackaged
 
 // ─── Instance config ──────────────────────────────────────────────────────────
 
-interface Config { instance?: string }
+interface Config { instance?: string; freeInstance?: boolean }
 
 type InstanceSource = 'clipboard' | 'exe'
 
@@ -151,7 +151,7 @@ const LOADING_OVERLAY_TOP_OFFSET = 52
 
 function resolveCielooOrigin(): string | null {
     const currentUrl = mainWindow?.webContents.getURL() ?? ''
-    if (isCielooUrl(currentUrl)) {
+    if (isCielooUrl(currentUrl) || isFreeInstanceUrl(currentUrl)) {
         try {
             return new URL(currentUrl).origin
         } catch {
@@ -159,9 +159,12 @@ function resolveCielooOrigin(): string | null {
         }
     }
 
-    const instance = readConfig().instance
-    if (!instance) return null
-    return `https://${instance}.cieloo.io`
+    const config = readConfig()
+    if (!config.instance) return null
+    if (config.freeInstance) {
+        try { return new URL(config.instance).origin } catch { return null }
+    }
+    return `https://${config.instance}.cieloo.io`
 }
 
 function openCielooPath(pathname: string): void {
@@ -755,6 +758,12 @@ function isCielooUrl(url: string): boolean {
     try { return new URL(url).hostname.endsWith('.cieloo.io') } catch { return false }
 }
 
+function isFreeInstanceUrl(url: string): boolean {
+    const config = readConfig()
+    if (!config.freeInstance || !config.instance) return false
+    try { return new URL(url).origin === new URL(config.instance).origin } catch { return false }
+}
+
 function isLocalUrl(url: string): boolean {
     return url.startsWith('file://') || url.startsWith('http://localhost:')
 }
@@ -772,12 +781,12 @@ function lockNavigation(wc: Electron.WebContents): void {
             void shell.openExternal(url)
             return
         }
-        if (isCielooUrl(url)) return
+        if (isCielooUrl(url) || isFreeInstanceUrl(url)) return
         event.preventDefault()
     })
     wc.on('will-redirect', (event, url) => {
         if (isDev && isLocalUrl(url)) return
-        if (isCielooUrl(url)) return
+        if (isCielooUrl(url) || isFreeInstanceUrl(url)) return
         event.preventDefault()
     })
 }
@@ -793,7 +802,7 @@ function handleWindowOpen(url: string): Electron.WindowOpenHandlerResponse {
     }
 
     // Never open non-cieloo URLs
-    if (!isCielooUrl(url)) return { action: 'deny' }
+    if (!isCielooUrl(url) && !isFreeInstanceUrl(url)) return { action: 'deny' }
 
     if (mode === 'main') {
         // Navigate the main window instead of opening a popup
@@ -827,13 +836,17 @@ function loadContent(): void {
     const config = readConfig()
 
     if (config.instance) {
-        void mainWindow.loadURL(`https://${config.instance}.cieloo.io`)
+        if (config.freeInstance) {
+            void mainWindow.loadURL(config.instance)
+        } else {
+            void mainWindow.loadURL(`https://${config.instance}.cieloo.io`)
+        }
         return
     }
 
     const suggested = detectBootstrapInstance()
     if (suggested) {
-        writeConfig({ instance: suggested.instance })
+        writeConfig({ ...config, instance: suggested.instance })
         void mainWindow.loadURL(`https://${suggested.instance}.cieloo.io`)
         return
     } else if (isDev && process.env.ELECTRON_RENDERER_URL) {
@@ -958,7 +971,7 @@ function createMainWindow(): void {
         enforceStableWebViewRendering(mainWindow.webContents)
         injectRuntimeCss(mainWindow.webContents, url)
         // Track last known good cieloo URL for offline recovery
-        if (isCielooUrl(url)) lastCielooUrl = url
+        if (isCielooUrl(url) || isFreeInstanceUrl(url)) lastCielooUrl = url
         syncSecondScreenWhenMainIsVisible()
     })
 
@@ -966,7 +979,7 @@ function createMainWindow(): void {
         if (!mainWindow) return
         enforceStableWebViewRendering(mainWindow.webContents)
         injectRuntimeCss(mainWindow.webContents, url)
-        if (isCielooUrl(url)) lastCielooUrl = url
+        if (isCielooUrl(url) || isFreeInstanceUrl(url)) lastCielooUrl = url
         syncSecondScreenWhenMainIsVisible()
     })
 
@@ -1041,14 +1054,33 @@ function registerIpc(): void {
     ipcMain.handle('config:get-bootstrap-instance', () => detectBootstrapInstance())
 
     ipcMain.handle('config:save-instance', (_e, instance: string) => {
-        const clean = normalizeInstance(instance)
-        if (!clean) throw new Error('Nom d\'instance invalide')
-        writeConfig({ instance: clean })
-        void mainWindow?.loadURL(`https://${clean}.cieloo.io`)
+        const existing = readConfig()
+        if (existing.freeInstance) {
+            try {
+                const url = new URL(instance)
+                writeConfig({ ...existing, instance: url.href })
+                void mainWindow?.loadURL(url.href)
+            } catch {
+                throw new Error('URL d\'instance invalide')
+            }
+        } else {
+            const clean = normalizeInstance(instance)
+            if (!clean) throw new Error('Nom d\'instance invalide')
+            writeConfig({ ...existing, instance: clean })
+            void mainWindow?.loadURL(`https://${clean}.cieloo.io`)
+        }
+    })
+
+    ipcMain.handle('config:toggle-free-instance', () => {
+        const config = readConfig()
+        const newState = !config.freeInstance
+        writeConfig({ ...config, freeInstance: newState })
+        return newState
     })
 
     ipcMain.handle('config:clear', () => {
-        writeConfig({})
+        const config = readConfig()
+        writeConfig(config.freeInstance ? { freeInstance: true } : {})
         if (isDev && process.env.ELECTRON_RENDERER_URL) {
             void mainWindow?.loadURL(process.env.ELECTRON_RENDERER_URL)
         } else {
@@ -1124,8 +1156,10 @@ function registerIpc(): void {
     // Called by the offline page or preload to reload the last known cieloo URL
     ipcMain.handle('net:reload-last', () => {
         const url = lastCielooUrl || (() => {
-            const instance = readConfig().instance
-            return instance ? `https://${instance}.cieloo.io` : null
+            const config = readConfig()
+            if (!config.instance) return null
+            if (config.freeInstance) return config.instance
+            return `https://${config.instance}.cieloo.io`
         })()
         if (!url) return
         void mainWindow?.loadURL(url)
