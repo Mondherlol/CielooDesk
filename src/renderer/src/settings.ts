@@ -1,5 +1,5 @@
 import './styles/settings.css'
-import { createIcons, Palette, KeyRound, Rocket, Keyboard, HardDrive } from 'lucide'
+import { createIcons, Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2 } from 'lucide'
 import type { AppSettings, ShortcutMap } from '../../modules/settings/main'
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -28,70 +28,29 @@ function initTabs(): void {
     })
 }
 
-function initDevMenu(): void {
+function initAdvancedTabReveal(): void {
     const versionEl = document.getElementById('sidebar-version')
-    const devMenuEl = document.getElementById('dev-menu')
-    const clearConfigBtn = document.getElementById('btn-dev-clear-config') as HTMLButtonElement | null
-    const freeInstanceBtn = document.getElementById('btn-free-instance') as HTMLButtonElement | null
-    if (!versionEl || !devMenuEl || !clearConfigBtn || !freeInstanceBtn) return
+    const advancedBtn = document.getElementById('sidebar-avancees') as HTMLButtonElement | null
+    if (!versionEl || !advancedBtn) return
 
     let tapCount = 0
     let tapTimer: ReturnType<typeof setTimeout> | null = null
 
-    const resetTapState = (): void => {
-        tapCount = 0
-        if (tapTimer) {
-            clearTimeout(tapTimer)
-            tapTimer = null
-        }
-    }
-
     versionEl.addEventListener('click', () => {
         tapCount += 1
-
         if (tapTimer) clearTimeout(tapTimer)
-        tapTimer = setTimeout(() => {
-            resetTapState()
-        }, 1200)
+        tapTimer = setTimeout(() => { tapCount = 0; tapTimer = null }, 1200)
 
         if (tapCount < 3) return
+        tapCount = 0
+        if (tapTimer) { clearTimeout(tapTimer); tapTimer = null }
 
-        const isVisible = devMenuEl.classList.toggle('visible')
-        devMenuEl.setAttribute('aria-hidden', String(!isVisible))
-        toast(isVisible ? 'Options avancées activées' : 'Options avancées masquées')
-        resetTapState()
-    })
-
-    // Load current free instance state
-    void window.cieloo.config.get().then(config => {
-        const checked = config.freeInstance ?? false
-        freeInstanceBtn.setAttribute('aria-checked', String(checked))
-    })
-
-    freeInstanceBtn.addEventListener('click', async () => {
-        freeInstanceBtn.disabled = true
-        try {
-            const newState = await window.cieloo.config.toggleFreeInstance()
-            freeInstanceBtn.setAttribute('aria-checked', String(newState))
-            toast(newState ? 'Instance libre activée' : 'Instance libre désactivée')
-        } finally {
-            freeInstanceBtn.disabled = false
-        }
-    })
-
-    clearConfigBtn.addEventListener('click', async () => {
-        const confirmed = window.confirm('Effacer la config instance et revenir à l\'écran de configuration ?')
-        if (!confirmed) return
-
-        clearConfigBtn.disabled = true
-        try {
-            await window.cieloo.config.clear()
-            window.close()
-        } finally {
-            clearConfigBtn.disabled = false
-        }
+        const isVisible = advancedBtn.style.display !== 'none'
+        advancedBtn.style.display = isVisible ? 'none' : ''
+        toast(isVisible ? 'Options avancées masquées' : 'Options avancées activées')
     })
 }
+
 
 // ─── Shortcut editor ──────────────────────────────────────────────────────────
 
@@ -261,14 +220,15 @@ async function refreshCredsStatus(): Promise<void> {
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function init(): Promise<void> {
-    createIcons({ icons: { Palette, KeyRound, Rocket, Keyboard, HardDrive } })
+    createIcons({ icons: { Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2 } })
     initTabs()
-    initDevMenu()
+    initAdvancedTabReveal()
 
-    const [settings, version, isDev] = await Promise.all([
+    const [settings, version, isDev, config] = await Promise.all([
         window.cieloo.settings.get(),
         window.cieloo.app.version(),
         window.cieloo.app.isDev(),
+        window.cieloo.config.get(),
     ])
     const versionEl = document.getElementById('sidebar-version')
     if (versionEl) versionEl.textContent = `V. ${version}`
@@ -284,6 +244,10 @@ async function init(): Promise<void> {
         // Démarrage
         ; (document.getElementById('toggle-startup') as HTMLInputElement).checked = settings.launchAtStartup
         ; (document.getElementById('toggle-require-printer') as HTMLInputElement).checked = settings.requirePrinter ?? false
+
+    // Options avancées
+    ;(document.getElementById('toggle-free-instance') as HTMLInputElement).checked = config.freeInstance ?? false
+    ;(document.getElementById('toggle-dev-mode') as HTMLInputElement).checked = settings.devMode ?? false
 
     // Raccourcis
     renderShortcuts(settings.shortcuts, isDev)
@@ -309,6 +273,7 @@ async function init(): Promise<void> {
     wireToggle('toggle-autologin', 'autoLogin', 'Connexion automatique')
     wireToggle('toggle-startup', 'launchAtStartup', 'Démarrage automatique')
     wireToggle('toggle-require-printer', 'requirePrinter', 'Imprimante obligatoire')
+    wireToggle('toggle-dev-mode', 'devMode', 'Mode dev')
 
 
     document.getElementById('select-spinner')!.addEventListener('change', async (e) => {
@@ -338,6 +303,31 @@ async function init(): Promise<void> {
         const updated = await window.cieloo.settings.resetShortcuts()
         renderShortcuts(updated.shortcuts, isDev)
         toast('Raccourcis réinitialisés')
+    })
+
+    const freeInstanceToggle = document.getElementById('toggle-free-instance') as HTMLInputElement
+    freeInstanceToggle.addEventListener('change', async () => {
+        freeInstanceToggle.disabled = true
+        try {
+            const newState = await window.cieloo.config.toggleFreeInstance()
+            freeInstanceToggle.checked = newState
+            toast(newState ? 'Instance libre activée' : 'Instance libre désactivée')
+        } finally {
+            freeInstanceToggle.disabled = false
+        }
+    })
+
+    const clearConfigBtn = document.getElementById('btn-dev-clear-config') as HTMLButtonElement
+    clearConfigBtn.addEventListener('click', async () => {
+        const confirmed = window.confirm('Effacer la config instance et revenir à l\'écran de configuration ?')
+        if (!confirmed) return
+        clearConfigBtn.disabled = true
+        try {
+            await window.cieloo.config.clear()
+            window.close()
+        } finally {
+            clearConfigBtn.disabled = false
+        }
     })
 
     function wireTextInput(id: string, key: keyof AppSettings, label: string): void {

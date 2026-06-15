@@ -15,6 +15,7 @@ import {
     getSystemPrinters,
     startPrintServer,
     stopPrintServer,
+    printTestPage,
 } from '../modules/print-server/main'
 import { startSecondScreen, syncSecondScreen } from '../modules/second-screen/main'
 import { initAutoUpdater, registerUpdaterIpc } from '../modules/updater/main'
@@ -624,7 +625,7 @@ function buildMenu(): void {
         { label: 'Support', submenu: supportSubmenu }
     ]
 
-    if (isDev) {
+    if (isDev || loadSettings().devMode) {
         menuTemplate.push({ label: 'Dev', submenu: devSubmenu })
     }
 
@@ -659,6 +660,11 @@ function openPrintSettingsWindow(): void {
     })
 
     printSettingsWindow.setMenu(null)
+    printSettingsWindow.webContents.on('before-input-event', (_e, input) => {
+        if (input.key === 'F12' && input.type === 'keyDown') {
+            printSettingsWindow?.webContents.toggleDevTools()
+        }
+    })
     printSettingsWindow.once('ready-to-show', () => {
         printSettingsWindow?.show()
     })
@@ -946,6 +952,38 @@ function createMainWindow(): void {
     mainWindow.webContents.setWindowOpenHandler(({ url }) => handleWindowOpen(url))
     lockNavigation(mainWindow.webContents)
 
+    // ── Impression silencieuse des tickets thermiques ─────────────────────────
+    // did-frame-navigate se déclenche quand la navigation est committée dans le
+    // renderer, AVANT le parsing HTML → on injecte window.print() override avant
+    // que PrintTicket() soit appelé par le script inline de receipt_designer.php.
+    mainWindow.webContents.on('did-frame-navigate', (_event, url, _code, _text, isMainFrame, frameProcessId, frameRoutingId) => {
+        if (isMainFrame || !url.includes('receipt_designer')) return
+
+        const findFrame = (root: Electron.WebFrameMain): Electron.WebFrameMain | undefined => {
+            if (root.processId === frameProcessId && root.routingId === frameRoutingId) return root
+            for (const child of root.frames) {
+                const found = findFrame(child)
+                if (found) return found
+            }
+            return undefined
+        }
+
+        const frame = mainWindow ? findFrame(mainWindow.webContents.mainFrame) : undefined
+        frame?.executeJavaScript(`(function(){
+if(window.__cp__)return;window.__cp__=1;
+var _o=window.print.bind(window);
+window.print=function(){
+  fetch('http://127.0.0.1:9100/print-window',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({url:window.location.href})
+  }).catch(function(){_o();}).finally(function(){
+    window.dispatchEvent(new Event('afterprint'));
+  });
+};
+})()`).catch(() => {})
+    })
+
     // Loading indicator — taskbar progress bar only (no title pollution)
     mainWindow.webContents.on('did-start-loading', () => {
         mainWindow?.setProgressBar(2, { mode: 'indeterminate' })
@@ -1127,30 +1165,114 @@ function registerIpc(): void {
 
     ipcMain.handle('print:printer-check', async () => {
         const settings = loadSettings()
-        const configured = settings.print.defaultPrinter !== null
+        const printerList = settings.print.printers
+
+        const configured = printerList.some(p => p.defaultPrinter !== null)
+        if (!configured) return { configured: false, connected: false }
+
         let connected = false
-        if (configured) {
-            try {
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    // Use getPrintersAsync directly to access the status field.
-                    // PRINTER_STATUS_OFFLINE (Win32 0x80) means the printer is physically
-                    // unreachable — driver installed but device disconnected or powered off.
-                    const PRINTER_STATUS_OFFLINE = 0x80
-                    const printers = await mainWindow.webContents.getPrintersAsync()
-                    const match = printers.find(p => p.name === settings.print.defaultPrinter)
-                    connected = match !== undefined && (match.status & PRINTER_STATUS_OFFLINE) === 0
-                } else {
-                    const printers = await getSystemPrinters(null)
-                    connected = printers.some(p => p.name === settings.print.defaultPrinter)
-                }
-            } catch {
-                connected = false
-            }
+        try {
+            const PRINTER_STATUS_OFFLINE = 0x80
+            const sysPrinters = mainWindow && !mainWindow.isDestroyed()
+                ? await mainWindow.webContents.getPrintersAsync()
+                : (await getSystemPrinters(null)).map(p => ({ name: p.name, status: 0 }))
+
+            connected = printerList.some(cp => {
+                if (!cp.defaultPrinter) return false
+                const match = sysPrinters.find(p => p.name === cp.defaultPrinter)
+                return match !== undefined && (match.status & PRINTER_STATUS_OFFLINE) === 0
+            })
+        } catch {
+            connected = printerList.some(p => p.defaultPrinter !== null)
         }
+
         return { configured, connected }
     })
 
+    ipcMain.handle('print:print-test', async (_e, config) => {
+        try {
+            await printTestPage(config)
+            return { success: true }
+        } catch (error) {
+            return { success: false, message: error instanceof Error ? error.message : 'Erreur inconnue' }
+        }
+    })
+
     ipcMain.handle('print:open-settings', () => openPrintSettingsWindow())
+
+    ipcMain.handle('print:open-printer-properties', (_e, printerName: string) => {
+        if (!printerName) return
+        const { execFile } = require('node:child_process') as typeof import('node:child_process')
+        execFile('rundll32.exe', ['printui.dll,PrintUIEntry', '/p', '/n', printerName])
+    })
+
+    ipcMain.handle('print:open-printer-options', (_e, printerName: string) => {
+        if (!printerName) return
+        const { execFile } = require('node:child_process') as typeof import('node:child_process')
+        execFile('rundll32.exe', ['printui.dll,PrintUIEntry', '/e', '/n', printerName])
+    })
+
+    ipcMain.handle('print:install-driver', async () => {
+        const base = app.isPackaged ? process.resourcesPath : app.getAppPath()
+        const assetsDir = path.join(base, 'assets')
+        let driverExe: string | null = null
+        try {
+            const files = fs.readdirSync(assetsDir)
+            const match = files.find(f => /driver.*\.exe$/i.test(f) || /\.driver\./i.test(f))
+            if (match) driverExe = path.join(assetsDir, match)
+        } catch { /* assets dir not found */ }
+        if (!driverExe) return { launched: false, reason: 'not_found' }
+        const err = await shell.openPath(driverExe)
+        return err ? { launched: false, reason: err } : { launched: true }
+    })
+
+    // ── MultiPrint API ────────────────────────────────────────────────────────
+
+    async function multiprintCookieHeader(origin: string): Promise<string> {
+        const cookies = await session.defaultSession.cookies.get({ url: origin })
+        const header = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+        console.log(`[MultiPrint] ${cookies.length} cookie(s) trouvé(s) pour ${origin}`)
+        return header
+    }
+
+    ipcMain.handle('multiprint:get-sections', async (): Promise<{ sections: unknown[] | null; error?: string }> => {
+        const origin = resolveCielooOrigin()
+        if (!origin) {
+            console.error('[MultiPrint GET] Instance Dolibarr non détectée (aucune URL Cieloo chargée)')
+            return { sections: null, error: 'Instance Dolibarr non détectée' }
+        }
+        const url = `${origin}/custom/cieloopos/api/multiprint_api.php`
+        const cookieHeader = await multiprintCookieHeader(origin)
+        console.log(`[MultiPrint GET] → ${url}`)
+        return new Promise((resolve) => {
+            const req = net.request({ method: 'GET', url })
+            if (cookieHeader) req.setHeader('Cookie', cookieHeader)
+            let body = ''
+            req.on('response', (res) => {
+                res.on('data', (chunk) => { body += chunk.toString() })
+                res.on('end', () => {
+                    console.log(`[MultiPrint GET] HTTP ${res.statusCode} — body: ${body.slice(0, 500)}`)
+                    try {
+                        const parsed = JSON.parse(body) as { sections?: unknown[] }
+                        if (res.statusCode !== 200) {
+                            resolve({ sections: null, error: `Erreur API HTTP ${res.statusCode}` })
+                        } else {
+                            resolve({ sections: parsed.sections ?? null })
+                        }
+                    } catch {
+                        console.error(`[MultiPrint GET] Réponse non-JSON: ${body.slice(0, 300)}`)
+                        resolve({ sections: null, error: `Réponse non-JSON (HTTP ${res.statusCode}): ${body.slice(0, 150)}` })
+                    }
+                })
+            })
+            req.on('error', (e: Error) => {
+                console.error(`[MultiPrint GET] Erreur réseau: ${e.message}`)
+                resolve({ sections: null, error: e.message })
+            })
+            req.end()
+        })
+    })
+
 
     // ── Réseau ────────────────────────────────────────────────────────────────
     // Called by the offline page or preload to reload the last known cieloo URL

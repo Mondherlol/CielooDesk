@@ -1,8 +1,16 @@
 
 export { }
 
-import type { AppSettings, ShortcutMap, PrintSettings } from '../../../modules/settings/main'
+import type { AppSettings, ShortcutMap, PrintSettings, PrinterConfig } from '../../../modules/settings/main'
 import type { PrintServerStatus } from '../../../modules/print-server/main'
+
+export type MultiprintSection = {
+    rowid: number
+    label: string
+    position: number
+    is_caisse: boolean
+    fk_template: string | null
+}
 
 declare global {
     interface Window {
@@ -39,6 +47,10 @@ declare global {
                 getStatus: () => Promise<PrintServerStatus>
                 saveConfig: (print: Partial<PrintSettings>) => Promise<{ config: PrintSettings; status: PrintServerStatus }>
                 printerCheck: () => Promise<{ configured: boolean; connected: boolean }>
+                printTest: (config: PrinterConfig) => Promise<{ success: boolean; message?: string }>
+                openPrinterProperties: (printerName: string) => Promise<void>
+                openPrinterOptions: (printerName: string) => Promise<void>
+                installDriver: () => Promise<{ launched: boolean; reason?: string }>
                 openSettings: () => Promise<void>
             }
             nav: {
@@ -57,6 +69,9 @@ declare global {
             }
             device: {
                 getNetworkInfo: () => Promise<{ mac: string; ip: string }>
+            }
+            multiprint: {
+                getSections: () => Promise<{ sections: MultiprintSection[] | null; error?: string }>
             }
         }
     }

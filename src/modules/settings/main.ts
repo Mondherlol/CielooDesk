@@ -8,17 +8,19 @@ import os from 'node:os'
 export type SpinnerPosition = 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right'
 export type NewWindowMode = 'main' | 'popup'
 
-export interface PrintSettings {
-    enabled: boolean
-    port: number
+export interface PrinterConfig {
+    id: string
+    label: string
     defaultPrinter: string | null
     paperWidth: number
     paperHeight: number
-    orientation: 'portrait' | 'landscape'
-    margins: number
-    scale: 'noscale' | 'shrink' | 'fit'
     copies: number
-    color: boolean
+}
+
+export interface PrintSettings {
+    enabled: boolean
+    port: number
+    printers: PrinterConfig[]
 }
 
 export interface ShortcutMap {
@@ -42,6 +44,7 @@ export interface AppSettings {
     requirePrinter: boolean
     serialNumber: string
     terminalName: string
+    devMode: boolean
 }
 
 export const DEFAULT_SHORTCUTS: ShortcutMap = {
@@ -64,17 +67,18 @@ const DEFAULTS: AppSettings = {
     requirePrinter: false,
     serialNumber: '',
     terminalName: '',
+    devMode: false,
     print: {
         enabled: true,
         port: 9100,
-        defaultPrinter: null,
-        paperWidth: 80,
-        paperHeight: 297,
-        orientation: 'portrait',
-        margins: 2,
-        scale: 'noscale',
-        copies: 1,
-        color: false,
+        printers: [{
+            id: 'printer-default',
+            label: 'Imprimante 1',
+            defaultPrinter: null,
+            paperWidth: 63.5,
+            paperHeight: 297,
+            copies: 1,
+        }],
     },
 }
 
@@ -84,21 +88,52 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
     return Math.min(Math.max(parsed, min), max)
 }
 
-export function normalizePrintSettings(value: Partial<PrintSettings> | undefined): PrintSettings {
+function clampNum(value: unknown, min: number, max: number, fallback: number): number {
+    const parsed = Number.parseFloat(String(value))
+    if (Number.isNaN(parsed)) return fallback
+    return Math.min(Math.max(parsed, min), max)
+}
+
+function normalizePrinterConfig(value: Partial<PrinterConfig> | undefined, index: number): PrinterConfig {
     return {
-        // CielooPrint is intentionally always active on a fixed local port.
-        enabled: true,
-        port: 9100,
+        id: typeof value?.id === 'string' && value.id.trim() ? value.id.trim() : `printer-${Date.now()}-${index}`,
+        label: typeof value?.label === 'string' && value.label.trim() ? value.label.trim().slice(0, 64) : `Imprimante ${index + 1}`,
         defaultPrinter: typeof value?.defaultPrinter === 'string' && value.defaultPrinter.trim()
             ? value.defaultPrinter.trim().slice(0, 256)
             : null,
-        paperWidth: clampInt(value?.paperWidth, 1, 1000, 80),
-        paperHeight: clampInt(value?.paperHeight, 1, 2000, 297),
-        orientation: value?.orientation === 'landscape' ? 'landscape' : 'portrait',
-        margins: clampInt(value?.margins, 0, 50, 2),
-        scale: value?.scale === 'shrink' || value?.scale === 'fit' ? value.scale : 'noscale',
+        paperWidth: clampNum(value?.paperWidth, 1, 1000, 63.5),
+        paperHeight: clampNum(value?.paperHeight, 1, 2000, 297),
         copies: clampInt(value?.copies, 1, 99, 1),
-        color: Boolean(value?.color),
+    }
+}
+
+export function normalizePrintSettings(value: Partial<PrintSettings> | undefined): PrintSettings {
+    const raw = value as Record<string, unknown> | undefined
+    // Migration: old flat format has `defaultPrinter` directly (no `printers` array)
+    if (raw && !Array.isArray(raw.printers) && typeof raw.defaultPrinter === 'string') {
+        return {
+            enabled: true,
+            port: 9100,
+            printers: [normalizePrinterConfig({
+                id: 'printer-default',
+                label: 'Imprimante 1',
+                defaultPrinter: raw.defaultPrinter || null,
+                paperWidth: typeof raw.paperWidth === 'number' ? raw.paperWidth : undefined,
+                paperHeight: typeof raw.paperHeight === 'number' ? raw.paperHeight : undefined,
+                copies: typeof raw.copies === 'number' ? raw.copies : undefined,
+            }, 0)],
+        }
+    }
+
+    const rawPrinters = Array.isArray(raw?.printers) ? raw.printers as Partial<PrinterConfig>[] : []
+    const printers = rawPrinters.length > 0
+        ? rawPrinters.map((p, i) => normalizePrinterConfig(p, i))
+        : [normalizePrinterConfig(undefined, 0)]
+
+    return {
+        enabled: true,
+        port: 9100,
+        printers,
     }
 }
 
@@ -267,6 +302,7 @@ export function registerSettingsIpc(
 
         if (key === 'launchAtStartup') app.setLoginItemSettings({ openAtLogin: Boolean(value), name: 'CielooPos' })
         if (key === 'fullscreen') getMainWindow()?.setFullScreen(Boolean(value))
+        if (key === 'devMode') _rebuildMenuCallback?.()
 
         getMainWindow()?.webContents.send('settings:updated')
         return updated

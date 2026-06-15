@@ -1,12 +1,12 @@
-import express, { type NextFunction, type Request, type Response } from 'express'
+import express, { type NextFunction, type Request as ExpReq, type Response as ExpRes } from 'express'
 import cors from 'cors'
 import multer from 'multer'
 import { execFile } from 'node:child_process'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, session } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 
-import { normalizePrintSettings, type PrintSettings } from '../settings/main'
+import { normalizePrintSettings, type PrintSettings, type PrinterConfig } from '../settings/main'
 
 export interface PrintServerStatus {
     active: boolean
@@ -37,16 +37,12 @@ function uploadsDir(): string {
 function resolveSumatraPath(): string {
     const candidates = app.isPackaged
         ? [
-            // Preferred location when using electron-builder extraResources.
             path.join(process.resourcesPath, 'assets', 'SumatraPDF.exe'),
-            // Fallback if file ended up unpacked from app.asar.
             path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'SumatraPDF.exe'),
-            // pdf-to-printer bundles its own Sumatra binary here.
             path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pdf-to-printer', 'dist', 'SumatraPDF-3.4.6-32.exe'),
             path.join(process.resourcesPath, 'SumatraPDF.exe'),
         ]
         : [
-            // Dev layout.
             path.join(app.getAppPath(), 'assets', 'SumatraPDF.exe'),
             path.join(app.getAppPath(), 'SumatraPDF.exe'),
         ]
@@ -58,13 +54,15 @@ function status(message?: string): PrintServerStatus {
     const port = currentSettings.port
     const isActive = Boolean(server)
     const sumatraFound = fs.existsSync(resolveSumatraPath())
+    const firstPrinter = currentSettings.printers[0]?.defaultPrinter ?? null
+    const hasAnyPrinter = currentSettings.printers.some(p => p.defaultPrinter !== null)
 
     return {
         active: isActive,
-        ready: isActive && Boolean(currentSettings.defaultPrinter) && sumatraFound,
+        ready: isActive && hasAnyPrinter,
         port,
         serverUrl: `http://127.0.0.1:${port}`,
-        printer: currentSettings.defaultPrinter,
+        printer: firstPrinter,
         sumatraFound,
         message: message ?? (isActive ? 'Serveur CielooPrint actif' : 'Serveur CielooPrint inactif'),
     }
@@ -87,39 +85,144 @@ function cleanupFile(filePath: string | undefined): void {
     }
 }
 
-function buildSumatraArgs(filePath: string): string[] {
-    const o = currentSettings
-    return [
-        '-print-to', o.defaultPrinter ?? '',
-        '-print-settings', `${o.copies}x,${o.orientation},${o.color ? 'color' : 'monochrome'},${o.scale},paper=${o.paperWidth}x${o.paperHeight}mm,margins=${o.margins}`,
-        '-silent',
-        '-exit-when-done',
-        filePath,
-    ]
-}
-
 function printWithSumatra(filePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
-        if (!currentSettings.defaultPrinter) {
+        const printer = currentSettings.printers[0]?.defaultPrinter
+        if (!printer) {
             reject(new Error('Aucune imprimante configurée'))
             return
         }
-
         const sumatraPath = resolveSumatraPath()
         if (!fs.existsSync(sumatraPath)) {
             reject(new Error('SumatraPDF.exe introuvable (attendu dans resources/assets).'))
             return
         }
-
-        const args = buildSumatraArgs(filePath)
+        const args = ['-print-to', printer, '-silent', '-exit-when-done', filePath]
         execFile(sumatraPath, args, { timeout: PRINT_TIMEOUT }, (error) => {
-            if (error) {
-                reject(error)
-                return
-            }
+            if (error) { reject(error); return }
             resolve()
         })
     })
+}
+
+function printUrlWithWebContents(url: string, config: PrinterConfig): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (!config.defaultPrinter) {
+            reject(new Error(`Imprimante "${config.label}" non configurée`))
+            return
+        }
+
+        let settled = false
+        const settle = (err?: Error): void => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            try { if (!win.isDestroyed()) win.destroy() } catch { /* ok */ }
+            err ? reject(err) : resolve()
+        }
+
+        const win = new BrowserWindow({
+            show: false,
+            width: 600,
+            height: 1400,
+            webPreferences: {
+                contextIsolation: true,
+                sandbox: false,
+                nodeIntegration: false,
+                session: session.defaultSession,
+            },
+        })
+
+        const timer = setTimeout(() => settle(new Error('Timeout impression')), PRINT_TIMEOUT)
+
+        win.webContents.once('did-finish-load', () => {
+            if (win.isDestroyed()) return
+            // Délai pour laisser JS (barcodes, images) terminer le rendu
+            setTimeout(() => {
+                if (win.isDestroyed()) return
+                win.webContents.print(
+                    {
+                        silent: true,
+                        printBackground: true,
+                        deviceName: config.defaultPrinter ?? '',
+                        copies: config.copies,
+                        pageSize: {
+                            width: config.paperWidth * 1000,
+                            height: config.paperHeight * 1000,
+                        },
+                    },
+                    (success, failureReason) => {
+                        settle(success ? undefined : new Error(failureReason || 'Erreur impression'))
+                    },
+                )
+            }, 1500)
+        })
+
+        win.webContents.once('did-fail-load', (_e, _code, desc) => {
+            settle(new Error(`Chargement échoué : ${desc}`))
+        })
+
+        // data: URLs are self-contained — no preview param needed
+        // ?preview=1 for receipt_designer.php only (skips auto PrintTicket call)
+        let printUrl: string
+        if (url.startsWith('data:')) {
+            printUrl = url
+        } else {
+            try {
+                const u = new URL(url)
+                u.searchParams.set('preview', '1')
+                printUrl = u.toString()
+            } catch {
+                printUrl = url.includes('?') ? `${url}&preview=1` : `${url}?preview=1`
+            }
+        }
+        void win.loadURL(printUrl)
+    })
+}
+
+async function printUrlToAllPrinters(url: string): Promise<void> {
+    const active = currentSettings.printers.filter(p => p.defaultPrinter !== null)
+    if (active.length === 0) throw new Error('Aucune imprimante configurée')
+    const results = await Promise.allSettled(active.map(p => printUrlWithWebContents(url, p)))
+    const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (errors.length > 0 && errors.length === active.length) {
+        const msg = errors[0].reason instanceof Error ? errors[0].reason.message : 'Erreur impression'
+        throw new Error(msg)
+    }
+}
+
+
+export async function printTestPage(config: PrinterConfig): Promise<void> {
+    if (!config.defaultPrinter) {
+        throw new Error(`Aucun driver Windows configuré pour "${config.label}".`)
+    }
+
+    const now = new Date()
+    const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:monospace;font-size:13px;width:${config.paperWidth}mm;padding:4mm;}
+.c{text-align:center;}.b{font-weight:bold;}
+.big{font-size:15px;font-weight:bold;letter-spacing:1px;}
+.ok{font-size:17px;font-weight:bold;letter-spacing:3px;margin:4px 0;}
+hr{border:none;border-top:1px dashed #000;margin:5px 0;}
+.row{display:flex;justify-content:space-between;font-size:12px;}
+</style></head><body>
+<div class="c big">CielooPrint</div>
+<div class="c" style="font-size:11px;margin-bottom:3px">Page de test</div>
+<hr/>
+<div class="row"><span class="b">Nom</span><span>${config.label}</span></div>
+<div class="row"><span class="b">Driver</span><span>${config.defaultPrinter}</span></div>
+<div class="row"><span class="b">Format</span><span>${config.paperWidth} x ${config.paperHeight} mm</span></div>
+<div class="row"><span class="b">Date</span><span>${dateStr} ${timeStr}</span></div>
+<hr/>
+<div class="c ok">** IMPRIMANTE OK **</div>
+</body></html>`
+
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+    return printUrlWithWebContents(dataUrl, config)
 }
 
 async function listPrintersFromPdfToPrinter(): Promise<Array<{ name: string }>> {
@@ -185,11 +288,11 @@ function buildExpressApp(): express.Application {
         methods: ['GET', 'POST'],
     }))
 
-    expressApp.get('/status', (_req: Request, res: Response) => {
+    expressApp.get('/status', (_req: ExpReq, res: ExpRes) => {
         res.json(status())
     })
 
-    expressApp.get('/api/printers', async (_req: Request, res: Response) => {
+    expressApp.get('/api/printers', async (_req: ExpReq, res: ExpRes) => {
         try {
             const printers = await listPrintersFromPdfToPrinter()
             res.json(printers.map((printer) => printer.name))
@@ -199,13 +302,54 @@ function buildExpressApp(): express.Application {
         }
     })
 
-    expressApp.post('/print', (req, res, next) => {
+    expressApp.get('/api/configured-printers', (_req: ExpReq, res: ExpRes) => {
+        const configured = currentSettings.printers
+            .filter(p => p.defaultPrinter !== null)
+            .map(p => ({
+                label: p.label,
+                printerName: p.defaultPrinter,
+                paperWidth: p.paperWidth,
+                paperHeight: p.paperHeight,
+                copies: p.copies,
+            }))
+        res.json(configured)
+    })
+
+    expressApp.post('/print-window', express.json(), async (req: ExpReq, res: ExpRes) => {
+        const url = typeof req.body?.url === 'string' ? req.body.url.trim() : ''
+        if (!url || !/^https?:\/\//i.test(url)) {
+            res.status(400).json({ error: 'URL manquante ou invalide' })
+            return
+        }
+
+        const rawSectionId = req.body?.sectionId
+        const sectionId = rawSectionId !== null && rawSectionId !== undefined ? Number(rawSectionId) : null
+
+        try {
+            if (sectionId !== null && !isNaN(sectionId)) {
+                const config = currentSettings.printers.find(p => p.id === `mp-section-${sectionId}`)
+                if (!config?.defaultPrinter) {
+                    res.status(400).json({ error: `Aucune imprimante configurée pour la section ${sectionId}` })
+                    return
+                }
+                await printUrlWithWebContents(url, config)
+            } else {
+                await printUrlToAllPrinters(url)
+            }
+            res.json({ success: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Erreur inconnue'
+            res.status(500).json({ error: message })
+        }
+    })
+
+    expressApp.post('/print', (_req, res, next) => {
         if (isRateLimited()) {
             res.status(429).json({ error: 'Trop de requetes. Reessayez dans quelques secondes.' })
             return
         }
         next()
-    }, upload.single('file'), async (req: Request, res: Response) => {
+    }, upload.single('file'), async (req: ExpReq, res: ExpRes) => {
         const filePath = req.file?.path
 
         if (!filePath) {
@@ -224,7 +368,7 @@ function buildExpressApp(): express.Application {
         }
     })
 
-    expressApp.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
+    expressApp.use((error: unknown, req: ExpReq, res: ExpRes, _next: NextFunction) => {
         cleanupFile(req.file?.path)
 
         const multerError = error as { code?: string; message?: string }
@@ -293,3 +437,4 @@ export async function stopPrintServer(): Promise<void> {
         activeServer.close(() => resolve())
     })
 }
+

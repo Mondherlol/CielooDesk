@@ -66,8 +66,21 @@ contextBridge.exposeInMainWorld('cieloo', {
             ipcRenderer.invoke('print:save-config', print),
         printerCheck: (): Promise<{ configured: boolean; connected: boolean }> =>
             ipcRenderer.invoke('print:printer-check'),
+        printTest: (config: unknown): Promise<{ success: boolean; message?: string }> =>
+            ipcRenderer.invoke('print:print-test', config),
+        openPrinterProperties: (printerName: string): Promise<void> =>
+            ipcRenderer.invoke('print:open-printer-properties', printerName),
+        openPrinterOptions: (printerName: string): Promise<void> =>
+            ipcRenderer.invoke('print:open-printer-options', printerName),
+        installDriver: (): Promise<{ launched: boolean; reason?: string }> =>
+            ipcRenderer.invoke('print:install-driver'),
         openSettings: (): Promise<void> =>
             ipcRenderer.invoke('print:open-settings'),
+    },
+
+    multiprint: {
+        getSections: (): Promise<{ sections: unknown[] | null; error?: string }> =>
+            ipcRenderer.invoke('multiprint:get-sections'),
     },
 
     nav: {

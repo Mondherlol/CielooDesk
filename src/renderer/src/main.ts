@@ -57,7 +57,12 @@ async function prefillInstance(): Promise<void> {
     setDetectedInfo(suggestion.source)
 }
 
-input.addEventListener('input', clearError)
+input.addEventListener('input', () => {
+    const pos = input.selectionStart
+    input.value = input.value.toLowerCase()
+    input.setSelectionRange(pos, pos)
+    clearError()
+})
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault()

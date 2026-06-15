@@ -1,6 +1,6 @@
 {
   "name": "CielooPosv2",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "CielooPos desktop shell",
   "main": "out/main/index.js",
   "author": "Mondher",
@@ -25,7 +25,7 @@
     "@types/express": "^4.17.21",
     "@types/multer": "^1.4.12",
     "@types/node": "22.15.30",
-    "electron": "35.0.0",
+    "electron": "^35.0.0",
     "electron-builder": "24.13.3",
     "electron-vite": "3.1.0",
     "typescript": "5.8.3"
