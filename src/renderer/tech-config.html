@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configuration technique — CielooPos</title>
+  <script type="module" src="/src/tech-config.ts"></script>
+  <style>
+    .port-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .port-row:last-child { border-bottom: none; }
+
+    .port-number {
+      font-size: 0.9rem;
+      color: var(--muted);
+      min-width: 72px;
+      font-family: monospace;
+    }
+    .port-number strong { color: var(--text); font-size: 1rem; }
+
+    .port-info { flex: 1; display: flex; align-items: center; gap: 8px; }
+
+    .port-process {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text);
+      font-family: monospace;
+    }
+
+    .port-pid {
+      font-size: 0.75rem;
+      color: var(--muted);
+      background: #f1f5f9;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 1px 6px;
+      font-family: monospace;
+    }
+
+    .port-free-label {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    .port-status {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
+
+    .port-status--used {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .port-status--free {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .nacef-check-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .nacef-port-input {
+      width: 88px;
+      padding: 5px 10px;
+      font-size: 0.88rem;
+      font-family: monospace;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      outline: none;
+    }
+    .nacef-port-input:focus { border-color: #6366f1; }
+
+    .nacef-check-btn {
+      padding: 5px 14px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border: 1px solid #6366f1;
+      border-radius: 6px;
+      background: #6366f1;
+      color: #fff;
+      cursor: pointer;
+    }
+    .nacef-check-btn:disabled { opacity: 0.55; cursor: default; }
+
+    .nacef-result {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      min-height: 26px;
+    }
+
+    .nacef-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
+    .nacef-badge--up   { background: #dcfce7; color: #166534; }
+    .nacef-badge--down { background: #fee2e2; color: #b91c1c; }
+
+    .nacef-result-detail {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="print-shell">
+    <header class="print-header">
+      <div class="print-header-left">
+        <h1>Configuration technique</h1>
+        <p>État des ports utilisés par NACEF</p>
+      </div>
+      <div class="print-header-actions">
+        <button id="btn-refresh" class="p-icon-btn" title="Rafraîchir">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="p-section-title">Ports réseau</div>
+      <div id="ports-container">
+        <div style="color: var(--muted); font-size: 0.85rem; padding: 8px 0;">Chargement…</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="p-section-title">Disponibilité NACEF</div>
+      <div class="nacef-check-row">
+        <input id="nacef-port" class="nacef-port-input" type="number" min="1" max="65535" value="10004" />
+        <button id="btn-ping-nacef" class="nacef-check-btn">Vérifier</button>
+        <div id="nacef-result" class="nacef-result"></div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

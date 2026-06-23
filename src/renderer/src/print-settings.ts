@@ -75,16 +75,13 @@ function activeConfig(): PrinterConfig | undefined {
 
 // ─── Active tab collection ─────────────────────────────────────────────────────
 
-function collectActiveTab(): void {
-    const config = activeConfig()
-    if (!config) return
-    const i = activeTabIndex
+function collectTab(config: PrinterConfig, suffix: string | number): void {
     const g = <T extends HTMLElement>(id: string) => document.getElementById(id) as T | null
 
-    const printerEl = g<HTMLSelectElement>(`inp-printer-${i}`)
-    const widthEl   = g<HTMLInputElement>(`inp-width-${i}`)
-    const heightEl  = g<HTMLInputElement>(`inp-height-${i}`)
-    const copiesEl  = g<HTMLInputElement>(`inp-copies-${i}`)
+    const printerEl = g<HTMLSelectElement>(`inp-printer-${suffix}`)
+    const widthEl   = g<HTMLInputElement>(`inp-width-${suffix}`)
+    const heightEl  = g<HTMLInputElement>(`inp-height-${suffix}`)
+    const copiesEl  = g<HTMLInputElement>(`inp-copies-${suffix}`)
 
     if (printerEl) config.defaultPrinter = printerEl.value || null
     if (widthEl)   config.paperWidth    = clampInt(Number(widthEl.value), 1, 1000, 80)
@@ -92,9 +89,42 @@ function collectActiveTab(): void {
     if (copiesEl)  config.copies        = clampInt(Number(copiesEl.value), 1, 99, 1)
 }
 
+function collectActiveTab(): void {
+    const config = activeConfig()
+    if (!config) return
+    collectTab(config, activeTabIndex)
+}
+
+// ─── Auto-save ─────────────────────────────────────────────────────────────────
+// Chaque modification est enregistrée automatiquement (plus de bouton « Enregistrer »).
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+async function persistConfig(): Promise<void> {
+    collectActiveTab()
+    // N'envoie que les imprimantes de caisse : les imprimantes code-barres sont
+    // gérées par leur propre fenêtre (saveConfig fusionne avec la config existante).
+    const payload: Partial<PrintSettings> = {
+        printers: printers.map(p => ({ ...p })),
+    }
+    await window.cieloo.print.saveConfig(payload)
+    void updateTabStatuses()
+}
+
+/** Enregistre après une courte temporisation (regroupe les frappes successives). */
+function scheduleSave(delay = 400): void {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+        saveTimer = null
+        persistConfig()
+            .then(() => toast('Enregistré'))
+            .catch(() => toast('Échec de l\'enregistrement'))
+    }, delay)
+}
+
 // ─── Printer list refresh ─────────────────────────────────────────────────────
 
-async function refreshPrinters(tabIndex: number, selected: string | null): Promise<void> {
+async function refreshPrinters(tabIndex: number | string, selected: string | null): Promise<void> {
     const systemPrinters = await window.cieloo.print.getPrinters()
     const selectEl = document.getElementById(`inp-printer-${tabIndex}`) as HTMLSelectElement | null
     if (!selectEl) return
@@ -118,8 +148,8 @@ async function refreshPrinters(tabIndex: number, selected: string | null): Promi
 
 async function updateTabStatuses(): Promise<void> {
     const sysPrinters = await window.cieloo.print.getPrinters()
-    displayedPrinters().forEach((config, index) => {
-        const dot = document.getElementById(`tab-dot-${index}`)
+    const applyDot = (dotId: string, config: PrinterConfig): void => {
+        const dot = document.getElementById(dotId)
         if (!dot) return
         if (!config.defaultPrinter) {
             dot.className = 'tab-dot tab-dot-idle'
@@ -131,7 +161,8 @@ async function updateTabStatuses(): Promise<void> {
             dot.className = 'tab-dot tab-dot-error'
             dot.title = 'Introuvable'
         }
-    })
+    }
+    displayedPrinters().forEach((config, index) => applyDot(`tab-dot-${index}`, config))
 }
 
 // ─── SVG icons ────────────────────────────────────────────────────────────────
@@ -145,7 +176,7 @@ const SVG_TRASH = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" s
 
 // ─── Panel HTML ───────────────────────────────────────────────────────────────
 
-function buildPanelHtml(config: PrinterConfig, index: number): string {
+function buildPanelHtml(config: PrinterConfig, index: number | string): string {
     const dis = config.defaultPrinter ? '' : ' disabled'
     return `
         <div class="p-section">
@@ -230,6 +261,7 @@ function showContextMenu(x: number, y: number, index: number, currentLabel: stri
             printers.splice(index, 1)
             if (activeTabIndex >= printers.length) activeTabIndex = printers.length - 1
             renderTabs()
+            scheduleSave(0)
         })
     }
 
@@ -273,6 +305,7 @@ function showRenameModal(index: number, currentLabel: string): void {
                 saveSectionsToCache()
             }
             renderTabs()
+            scheduleSave(0)
         }
         overlay.remove()
     }
@@ -287,6 +320,63 @@ function showRenameModal(index: number, currentLabel: string): void {
 }
 
 // ─── Tab rendering ────────────────────────────────────────────────────────────
+
+/** Branche les contrôles d'un panneau (sélecteur, propriétés, options, page de test). */
+function wirePanel(config: PrinterConfig, suffix: string | number): void {
+    // Printer list refresh
+    document.getElementById(`btn-refresh-${suffix}`)?.addEventListener('click', async () => {
+        const sel = (document.getElementById(`inp-printer-${suffix}`) as HTMLSelectElement | null)?.value || null
+        await refreshPrinters(suffix, sel)
+        toast('Imprimantes actualisees')
+    })
+
+    // Open printer properties / options
+    document.getElementById(`btn-props-${suffix}`)?.addEventListener('click', () => {
+        const name = (document.getElementById(`inp-printer-${suffix}`) as HTMLSelectElement | null)?.value
+        if (name) void window.cieloo.print.openPrinterProperties(name)
+    })
+    document.getElementById(`btn-opts-${suffix}`)?.addEventListener('click', () => {
+        const name = (document.getElementById(`inp-printer-${suffix}`) as HTMLSelectElement | null)?.value
+        if (name) void window.cieloo.print.openPrinterOptions(name)
+    })
+
+    // Enable/disable action buttons when selection changes + enregistrement auto
+    const selEl = document.getElementById(`inp-printer-${suffix}`) as HTMLSelectElement | null
+    const propsBtn = document.getElementById(`btn-props-${suffix}`) as HTMLButtonElement | null
+    const optsBtn  = document.getElementById(`btn-opts-${suffix}`) as HTMLButtonElement | null
+    selEl?.addEventListener('change', () => {
+        const hasVal = Boolean(selEl.value)
+        if (propsBtn) propsBtn.disabled = !hasVal
+        if (optsBtn)  optsBtn.disabled  = !hasVal
+        scheduleSave(0) // changement de driver → enregistrement immédiat
+    })
+
+    // Format papier / copies → enregistrement auto (débounce pendant la frappe,
+    // immédiat à la perte de focus / Entrée)
+    ;['inp-width', 'inp-height', 'inp-copies'].forEach((prefix) => {
+        const el = document.getElementById(`${prefix}-${suffix}`) as HTMLInputElement | null
+        el?.addEventListener('input', () => scheduleSave())
+        el?.addEventListener('change', () => scheduleSave(0))
+    })
+
+    void refreshPrinters(suffix, config.defaultPrinter)
+
+    // Print test page
+    document.getElementById(`btn-testpage-${suffix}`)?.addEventListener('click', async () => {
+        collectActiveTab()
+        const btn = document.getElementById(`btn-testpage-${suffix}`) as HTMLButtonElement | null
+        const statusEl = document.getElementById(`test-page-status-${suffix}`)
+        if (btn) btn.disabled = true
+        if (statusEl) { statusEl.textContent = 'Impression...'; statusEl.className = 'test-page-status' }
+        const result = await window.cieloo.print.printTest(config)
+        if (btn) btn.disabled = false
+        if (statusEl) {
+            statusEl.textContent = result.success ? '✓ Envoye' : `✗ ${result.message ?? 'Erreur'}`
+            statusEl.className = `test-page-status ${result.success ? 'tp-ok' : 'tp-error'}`
+            setTimeout(() => { if (statusEl) { statusEl.textContent = ''; statusEl.className = 'test-page-status' } }, 4000)
+        }
+    })
+}
 
 function renderTabs(): void {
     const nav = document.getElementById('tab-nav')!
@@ -332,6 +422,7 @@ function renderTabs(): void {
             })
             activeTabIndex = printers.length - 1
             renderTabs()
+            scheduleSave(0)
         })
     }
 
@@ -352,50 +443,7 @@ function renderTabs(): void {
             showContextMenu(e.clientX, e.clientY, index, currentLabel)
         })
 
-        // Printer list refresh
-        document.getElementById(`btn-refresh-${index}`)?.addEventListener('click', async () => {
-            const sel = (document.getElementById(`inp-printer-${index}`) as HTMLSelectElement | null)?.value || null
-            await refreshPrinters(index, sel)
-            toast('Imprimantes actualisees')
-        })
-
-        // Open printer properties / options
-        document.getElementById(`btn-props-${index}`)?.addEventListener('click', () => {
-            const name = (document.getElementById(`inp-printer-${index}`) as HTMLSelectElement | null)?.value
-            if (name) void window.cieloo.print.openPrinterProperties(name)
-        })
-        document.getElementById(`btn-opts-${index}`)?.addEventListener('click', () => {
-            const name = (document.getElementById(`inp-printer-${index}`) as HTMLSelectElement | null)?.value
-            if (name) void window.cieloo.print.openPrinterOptions(name)
-        })
-
-        // Enable/disable action buttons when selection changes
-        const selEl = document.getElementById(`inp-printer-${index}`) as HTMLSelectElement | null
-        const propsBtn = document.getElementById(`btn-props-${index}`) as HTMLButtonElement | null
-        const optsBtn  = document.getElementById(`btn-opts-${index}`) as HTMLButtonElement | null
-        selEl?.addEventListener('change', () => {
-            const hasVal = Boolean(selEl.value)
-            if (propsBtn) propsBtn.disabled = !hasVal
-            if (optsBtn)  optsBtn.disabled  = !hasVal
-        })
-
-        void refreshPrinters(index, config.defaultPrinter)
-
-        // Print test page
-        document.getElementById(`btn-testpage-${index}`)?.addEventListener('click', async () => {
-            collectActiveTab()
-            const btn = document.getElementById(`btn-testpage-${index}`) as HTMLButtonElement | null
-            const statusEl = document.getElementById(`test-page-status-${index}`)
-            if (btn) btn.disabled = true
-            if (statusEl) { statusEl.textContent = 'Impression...'; statusEl.className = 'test-page-status' }
-            const result = await window.cieloo.print.printTest(config)
-            if (btn) btn.disabled = false
-            if (statusEl) {
-                statusEl.textContent = result.success ? '✓ Envoye' : `✗ ${result.message ?? 'Erreur'}`
-                statusEl.className = `test-page-status ${result.success ? 'tp-ok' : 'tp-error'}`
-                setTimeout(() => { if (statusEl) { statusEl.textContent = ''; statusEl.className = 'test-page-status' } }, 4000)
-            }
-        })
+        wirePanel(config, index)
     })
 
     void updateTabStatuses()
@@ -427,6 +475,11 @@ async function init(): Promise<void> {
 
     renderTabs()
 
+    // Filet de sécurité : enregistre une éventuelle modification en attente avant fermeture.
+    window.addEventListener('beforeunload', () => {
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void persistConfig() }
+    })
+
     document.getElementById('btn-reload-sections')?.addEventListener('click', async () => {
         const btn = document.getElementById('btn-reload-sections') as HTMLButtonElement | null
         if (btn) btn.disabled = true
@@ -454,17 +507,6 @@ async function init(): Promise<void> {
         }
     })
 
-    document.getElementById('btn-save-print')!.addEventListener('click', async () => {
-        collectActiveTab()
-        const payload: Partial<PrintSettings> = { printers: printers.map(p => ({ ...p })) }
-        const result = await window.cieloo.print.saveConfig(payload)
-        printers = result.config.printers.map(p => ({ ...p }))
-
-        toast('Configuration impression enregistrée')
-
-        renderTabs()
-        void updateTabStatuses()
-    })
 }
 
 void init()

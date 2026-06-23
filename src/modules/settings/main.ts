@@ -21,7 +21,19 @@ export interface PrintSettings {
     enabled: boolean
     port: number
     printers: PrinterConfig[]
+    /** Imprimante d'étiquettes code-barres (rouleau, ex. 40×30 mm) */
+    barcodePrinter: PrinterConfig
+    /** Imprimante de planches de codes-barres (feuille A4) */
+    barcodeSheetPrinter: PrinterConfig
 }
+
+export const BARCODE_PRINTER_ID = 'printer-barcode'
+export const BARCODE_SHEET_PRINTER_ID = 'printer-barcode-sheet'
+
+// Dimensions par défaut (mm) pour chaque type d'imprimante
+const DEFAULT_POS_DIMS = { w: 63.5, h: 297 }
+const DEFAULT_BARCODE_LABEL_DIMS = { w: 40, h: 30 }
+const DEFAULT_BARCODE_SHEET_DIMS = { w: 210, h: 297 }
 
 export interface ShortcutMap {
     reload: string
@@ -79,6 +91,22 @@ const DEFAULTS: AppSettings = {
             paperHeight: 297,
             copies: 1,
         }],
+        barcodePrinter: {
+            id: BARCODE_PRINTER_ID,
+            label: 'Étiquettes',
+            defaultPrinter: null,
+            paperWidth: DEFAULT_BARCODE_LABEL_DIMS.w,
+            paperHeight: DEFAULT_BARCODE_LABEL_DIMS.h,
+            copies: 1,
+        },
+        barcodeSheetPrinter: {
+            id: BARCODE_SHEET_PRINTER_ID,
+            label: 'Planche A4',
+            defaultPrinter: null,
+            paperWidth: DEFAULT_BARCODE_SHEET_DIMS.w,
+            paperHeight: DEFAULT_BARCODE_SHEET_DIMS.h,
+            copies: 1,
+        },
     },
 }
 
@@ -94,21 +122,46 @@ function clampNum(value: unknown, min: number, max: number, fallback: number): n
     return Math.min(Math.max(parsed, min), max)
 }
 
-function normalizePrinterConfig(value: Partial<PrinterConfig> | undefined, index: number): PrinterConfig {
+function normalizePrinterConfig(
+    value: Partial<PrinterConfig> | undefined,
+    index: number,
+    dimFallback: { w: number; h: number } = DEFAULT_POS_DIMS,
+): PrinterConfig {
     return {
         id: typeof value?.id === 'string' && value.id.trim() ? value.id.trim() : `printer-${Date.now()}-${index}`,
         label: typeof value?.label === 'string' && value.label.trim() ? value.label.trim().slice(0, 64) : `Imprimante ${index + 1}`,
         defaultPrinter: typeof value?.defaultPrinter === 'string' && value.defaultPrinter.trim()
             ? value.defaultPrinter.trim().slice(0, 256)
             : null,
-        paperWidth: clampNum(value?.paperWidth, 1, 1000, 63.5),
-        paperHeight: clampNum(value?.paperHeight, 1, 2000, 297),
+        paperWidth: clampNum(value?.paperWidth, 1, 1000, dimFallback.w),
+        paperHeight: clampNum(value?.paperHeight, 1, 2000, dimFallback.h),
         copies: clampInt(value?.copies, 1, 99, 1),
+    }
+}
+
+function normalizeBarcodePrinter(value: Partial<PrinterConfig> | undefined): PrinterConfig {
+    const base = normalizePrinterConfig(value, 0, DEFAULT_BARCODE_LABEL_DIMS)
+    return {
+        ...base,
+        id: BARCODE_PRINTER_ID,
+        label: typeof value?.label === 'string' && value.label.trim() ? value.label.trim().slice(0, 64) : 'Étiquettes',
+    }
+}
+
+function normalizeBarcodeSheetPrinter(value: Partial<PrinterConfig> | undefined): PrinterConfig {
+    const base = normalizePrinterConfig(value, 0, DEFAULT_BARCODE_SHEET_DIMS)
+    return {
+        ...base,
+        id: BARCODE_SHEET_PRINTER_ID,
+        label: typeof value?.label === 'string' && value.label.trim() ? value.label.trim().slice(0, 64) : 'Planche A4',
     }
 }
 
 export function normalizePrintSettings(value: Partial<PrintSettings> | undefined): PrintSettings {
     const raw = value as Record<string, unknown> | undefined
+    const barcodePrinter = normalizeBarcodePrinter(raw?.barcodePrinter as Partial<PrinterConfig> | undefined)
+    const barcodeSheetPrinter = normalizeBarcodeSheetPrinter(raw?.barcodeSheetPrinter as Partial<PrinterConfig> | undefined)
+
     // Migration: old flat format has `defaultPrinter` directly (no `printers` array)
     if (raw && !Array.isArray(raw.printers) && typeof raw.defaultPrinter === 'string') {
         return {
@@ -122,6 +175,8 @@ export function normalizePrintSettings(value: Partial<PrintSettings> | undefined
                 paperHeight: typeof raw.paperHeight === 'number' ? raw.paperHeight : undefined,
                 copies: typeof raw.copies === 'number' ? raw.copies : undefined,
             }, 0)],
+            barcodePrinter,
+            barcodeSheetPrinter,
         }
     }
 
@@ -134,6 +189,8 @@ export function normalizePrintSettings(value: Partial<PrintSettings> | undefined
         enabled: true,
         port: 9100,
         printers,
+        barcodePrinter,
+        barcodeSheetPrinter,
     }
 }
 

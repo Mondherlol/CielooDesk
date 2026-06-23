@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Imprimantes Codes Barres - CielooPos</title>
+  <script type="module" src="/src/barcode-settings.ts"></script>
+</head>
+<body>
+  <div class="print-shell">
+    <header class="print-header">
+      <div class="print-header-left">
+        <h1>Imprimantes Codes Barres</h1>
+        <p>Configurez l'imprimante d'étiquettes et l'imprimante de planches A4</p>
+      </div>
+      <div class="print-header-actions">
+        <button id="btn-install-driver" class="btn-install-driver">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Installer le driver
+        </button>
+      </div>
+    </header>
+
+    <section class="card">
+      <div id="tab-nav" class="tab-nav"></div>
+      <div id="tab-panels" class="tab-panels"></div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</body>
+</html>

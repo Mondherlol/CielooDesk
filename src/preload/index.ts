@@ -68,19 +68,32 @@ contextBridge.exposeInMainWorld('cieloo', {
             ipcRenderer.invoke('print:printer-check'),
         printTest: (config: unknown): Promise<{ success: boolean; message?: string }> =>
             ipcRenderer.invoke('print:print-test', config),
+        printBarcodeTest: (config: unknown, mode: 'label' | 'sheet'): Promise<{ success: boolean; message?: string }> =>
+            ipcRenderer.invoke('print:print-barcode-test', config, mode),
         openPrinterProperties: (printerName: string): Promise<void> =>
             ipcRenderer.invoke('print:open-printer-properties', printerName),
         openPrinterOptions: (printerName: string): Promise<void> =>
             ipcRenderer.invoke('print:open-printer-options', printerName),
         installDriver: (): Promise<{ launched: boolean; reason?: string }> =>
             ipcRenderer.invoke('print:install-driver'),
+        downloadDriver: (url: string): Promise<{ launched: boolean; reason?: string }> =>
+            ipcRenderer.invoke('print:download-driver', url),
         openSettings: (): Promise<void> =>
             ipcRenderer.invoke('print:open-settings'),
+        openBarcodeSettings: (): Promise<void> =>
+            ipcRenderer.invoke('print:open-barcode-settings'),
     },
 
     multiprint: {
         getSections: (): Promise<{ sections: unknown[] | null; error?: string }> =>
             ipcRenderer.invoke('multiprint:get-sections'),
+    },
+
+    tech: {
+        getPortInfo: (): Promise<Array<{ port: number; pid: number | null; processName: string | null; listening: boolean }>> =>
+            ipcRenderer.invoke('tech:get-port-info'),
+        pingNacef: (port: number): Promise<{ available: boolean; statusCode?: number; error?: string }> =>
+            ipcRenderer.invoke('tech:ping-nacef', port),
     },
 
     nav: {
@@ -230,8 +243,10 @@ function isSettingsPage(): boolean {
     const href = window.location.href
     return href.includes('settings.html')
         || href.includes('print-settings.html')
+        || href.includes('barcode-settings.html')
         || href.includes('second-display-settings.html')
         || href.includes('contact.html')
+        || href.includes('tech-config.html')
 }
 
 function runInjections(): void {
@@ -769,11 +784,13 @@ async function injectSplash(): Promise<void> {
             display:flex;align-items:center;justify-content:center;
             color:#fff;font-size:1.7rem;font-weight:900;letter-spacing:-.04em;
             box-shadow:0 10px 32px rgba(59,130,246,.38);
-            margin-bottom:22px;user-select:none;overflow:hidden;
+            margin-bottom:48px;user-select:none;overflow:hidden;
         }
-        #_sp_badge img{width:80px;height:80px;display:block;border-radius:22px;}
-        #_sp_name{color:#111827;font-size:1.5rem;font-weight:800;letter-spacing:-.03em;margin-bottom:5px;}
-        #_sp_sub{color:#9ca3af;font-size:.82rem;margin-bottom:44px;}
+        #_sp_badge.sp-logo{
+            width:auto;height:auto;border-radius:0;
+            background:none;box-shadow:none;overflow:visible;
+        }
+        #_sp_badge img{width:auto;height:auto;max-width:340px;max-height:200px;display:block;}
         #_sp_steps{display:flex;flex-direction:column;gap:14px;min-width:250px;}
         .sp_step{
             display:flex;align-items:center;gap:11px;
@@ -803,9 +820,7 @@ async function injectSplash(): Promise<void> {
     const splashEl = document.createElement('div')
     splashEl.id = '_cl_splash'
     splashEl.innerHTML = `
-        <div id="_sp_badge">CP</div>
-        <div id="_sp_name">CielooPos</div>
-        <div id="_sp_sub">Système de caisse</div>
+        <div id="_sp_badge">CL</div>
         <div id="_sp_steps">
             <div class="sp_step" id="_sp_s1">
                 <div class="sp_icon"><div class="sp_dot"></div></div>
@@ -858,9 +873,8 @@ async function injectSplash(): Promise<void> {
     void ipcRenderer.invoke('app:icon-url').then((url: string | null) => {
         const badge = document.getElementById('_sp_badge')
         if (!badge || !url) return
-        badge.style.background = 'none'
-        badge.style.boxShadow = 'none'
-        badge.innerHTML = `<img src="${url}" alt="CielooPos" />`
+        badge.classList.add('sp-logo')
+        badge.innerHTML = `<img src="${url}" alt="" />`
     }).catch(() => { /* keep fallback CP text */ })
 
     // ── Sequence ────────────────────────────────────────────────────────────────

@@ -87,8 +87,8 @@ export function registerUpdaterIpc(): void {
 
     ipcMain.handle('app:icon-url', () => {
         const iconPath = app.isPackaged
-            ? path.join(process.resourcesPath, 'assets/img/512_rounded.png')
-            : path.join(app.getAppPath(), 'assets/img/512_rounded.png')
+            ? path.join(process.resourcesPath, 'assets/img/logo_complet.png')
+            : path.join(app.getAppPath(), 'assets/img/logo_complet.png')
         try {
             const data = fs.readFileSync(iconPath)
             return `data:image/png;base64,${data.toString('base64')}`

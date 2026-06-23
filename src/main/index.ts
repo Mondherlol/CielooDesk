@@ -1,13 +1,15 @@
 import { app, BrowserWindow, ipcMain, Menu, globalShortcut, net, dialog, shell, clipboard, screen, session } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
-import { spawn } from 'node:child_process'
+import http from 'node:http'
+import os from 'node:os'
+import { spawn, exec } from 'node:child_process'
 import { start as startLocalMediaServer, stop as stopLocalMediaServer } from '../modules/local-media-server/main'
 
 import { registerAutoLoginIpc } from '../modules/auto-login/main'
 import {
     registerSettingsIpc, applyBootSettings, openSettingsWindow,
-    loadSettings, onRebuildMenu, setPrintSettings, updateSettings, type PrintSettings
+    loadSettings, onRebuildMenu, setPrintSettings, updateSettings, getNetworkInfo, type PrintSettings
 } from '../modules/settings/main'
 import {
     applyPrintSettings,
@@ -16,11 +18,281 @@ import {
     startPrintServer,
     stopPrintServer,
     printTestPage,
+    printBarcodeTestPage,
+    type BarcodeTestMode,
 } from '../modules/print-server/main'
 import { startSecondScreen, syncSecondScreen } from '../modules/second-screen/main'
 import { initAutoUpdater, registerUpdaterIpc } from '../modules/updater/main'
 
 const isDev = !app.isPackaged
+
+// ─── RustDesk / Dashboard integration ────────────────────────────────────────
+
+const DASHBOARD_API_URL = process.env.DASHBOARD_API_URL ?? 'http://102.204.206.120'
+const TERMINAL_API_KEY = process.env.TERMINAL_API_KEY ?? 'CHANGE_ME'
+const RUSTDESK_CONFIG = process.env.RUSTDESK_CONFIG ?? ''
+const RUSTDESK_SERVER = process.env.RUSTDESK_SERVER ?? ''
+const RUSTDESK_KEY = process.env.RUSTDESK_KEY ?? ''
+
+let _rustdeskIdCache: string | null = null
+
+function getRustDeskId(): string | null {
+    if (_rustdeskIdCache) return _rustdeskIdCache
+    const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming')
+    const candidatePaths = [
+        'C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Roaming\\RustDesk\\config\\RustDesk2.toml',
+        'C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Roaming\\RustDesk\\config\\RustDesk.toml',
+        path.join(appData, 'RustDesk', 'config', 'RustDesk2.toml'),
+        path.join(appData, 'RustDesk', 'config', 'RustDesk.toml'),
+        'C:\\ProgramData\\RustDesk\\config\\RustDesk2.toml',
+        'C:\\ProgramData\\RustDesk\\config\\RustDesk.toml',
+    ]
+    for (const p of candidatePaths) {
+        try {
+            const content = fs.readFileSync(p, 'utf-8')
+            const match = content.match(/^id\s*=\s*['"]?(\d+)['"]?/m)
+            if (match?.[1]) { _rustdeskIdCache = match[1]; return match[1] }
+        } catch { /* fichier absent */ }
+    }
+    return null
+}
+
+async function getRustDeskIdFromCLI(): Promise<string | null> {
+    return new Promise((resolve) => {
+        const exePath = getRustDeskExePath()
+        if (!exePath) { resolve(null); return }
+        exec(`"${exePath}" --get-id`, { timeout: 4000 }, (_err, stdout) => {
+            const match = stdout?.match(/(\d[\d\s]{5,}\d)/)
+            resolve(match ? match[1].replace(/\s/g, '') : null)
+        })
+    })
+}
+
+// Dossier portable géré par CielooDesk
+const RUSTDESK_PORTABLE_DIR = path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'CielooRustDesk')
+const RUSTDESK_SERVICE_FLAG = path.join(RUSTDESK_PORTABLE_DIR, '.service-installed')
+const RUSTDESK_PORTABLE_EXE = path.join(RUSTDESK_PORTABLE_DIR, 'rustdesk.exe')
+
+const RUSTDESK_EXE_CANDIDATES = [
+    RUSTDESK_PORTABLE_EXE, // priorité : notre portable
+    path.join(process.env.PROGRAMFILES ?? 'C:\\Program Files', 'RustDesk', 'rustdesk.exe'),
+    path.join(process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)', 'RustDesk', 'rustdesk.exe'),
+    path.join(process.env.LOCALAPPDATA ?? '', 'RustDesk', 'rustdesk.exe'),
+    path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'RustDesk', 'rustdesk.exe'),
+]
+
+function getRustDeskExePath(): string | null {
+    return RUSTDESK_EXE_CANDIDATES.find(p => fs.existsSync(p)) ?? null
+}
+
+
+async function applyRustDeskConfig(): Promise<string> {
+    if (!RUSTDESK_SERVER || !RUSTDESK_KEY) return 'RUSTDESK_SERVER ou RUSTDESK_KEY non défini dans le build'
+    const exePath = getRustDeskExePath()
+    if (!exePath) return `rustdesk.exe introuvable\nChemins vérifiés:\n${RUSTDESK_EXE_CANDIDATES.join('\n')}`
+
+    // 1. Écriture directe du RustDesk2.toml dans l'AppData utilisateur
+    const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming')
+    const configDir = path.join(appData, 'RustDesk', 'config')
+    const tomlContent = `[options]\ncustom-rendezvous-server = '${RUSTDESK_SERVER}'\nrelay-server = '${RUSTDESK_SERVER}'\nkey = '${RUSTDESK_KEY}'\napi-server = ''\napprove-mode = 'accept'\n`
+    try {
+        fs.mkdirSync(configDir, { recursive: true })
+        fs.writeFileSync(path.join(configDir, 'RustDesk2.toml'), tomlContent, 'utf-8')
+        fs.writeFileSync(path.join(configDir, 'RustDesk.toml'), tomlContent, 'utf-8')
+    } catch (err: unknown) {
+        return `Erreur écriture config: ${err instanceof Error ? err.message : String(err)}`
+    }
+
+    // 2. Redémarrer RustDesk : via le service s'il est installé, sinon via le tray
+    const serviceInstalled = await new Promise<boolean>(resolve => {
+        exec('sc query RustDesk', err => resolve(!err))
+    })
+
+    if (serviceInstalled) {
+        await new Promise<void>(resolve => exec('sc stop RustDesk', () => resolve()))
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        exec('sc start RustDesk', () => { })
+    } else {
+        await new Promise<void>((resolve) => {
+            exec('taskkill /F /IM rustdesk.exe /T', () => resolve())
+        })
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        spawn(exePath, ['--tray'], { detached: true, stdio: 'ignore' }).unref()
+    }
+
+    return `Config écrite + RustDesk redémarré (${serviceInstalled ? 'service' : 'tray'})\nServeur: ${RUSTDESK_SERVER}\nexe: ${exePath}`
+}
+
+function isRustDeskConfigured(): boolean {
+    if (!RUSTDESK_SERVER) return false
+    const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming')
+    try {
+        const content = fs.readFileSync(path.join(appData, 'RustDesk', 'config', 'RustDesk2.toml'), 'utf-8')
+        return content.includes(`custom-rendezvous-server = '${RUSTDESK_SERVER}'`) && content.includes(`approve-mode = 'accept'`)
+    } catch { return false }
+}
+
+function configureRustDeskServer(): void {
+    if (!isRustDeskConfigured()) void applyRustDeskConfig()
+}
+
+function createRustDeskShortcutIfNeeded(): void {
+    const desktopPath = path.join(os.homedir(), 'Desktop')
+    const shortcutPath = path.join(desktopPath, 'RustDesk.lnk')
+    if (fs.existsSync(shortcutPath)) return
+    const exePath = getRustDeskExePath()
+    if (!exePath) return
+    const ps = `$s=(New-Object -COM WScript.Shell).CreateShortcut('${shortcutPath.replace(/'/g, "''")}');$s.TargetPath='${exePath.replace(/'/g, "''")}';$s.Save()`
+    spawn('powershell.exe', ['-NonInteractive', '-Command', ps], { detached: true, stdio: 'ignore' }).unref()
+}
+
+async function installRustDeskIfNeeded(): Promise<void> {
+    // Copie le portable dans LocalAppData si pas encore présent
+    if (!fs.existsSync(RUSTDESK_PORTABLE_EXE)) {
+        const srcPath = app.isPackaged
+            ? path.join(process.resourcesPath, 'assets', 'RustDesk.exe')
+            : path.join(app.getAppPath(), 'assets', 'RustDesk.exe')
+        if (fs.existsSync(srcPath)) {
+            try {
+                fs.mkdirSync(RUSTDESK_PORTABLE_DIR, { recursive: true })
+                fs.copyFileSync(srcPath, RUSTDESK_PORTABLE_EXE)
+                // Autostart tray en fallback (supprimé si le service s'installe avec succès)
+                exec(`reg add "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run" /v RustDesk /t REG_SZ /d "\\"${RUSTDESK_PORTABLE_EXE}\\" --tray" /f`)
+            } catch { /* fail silently */ }
+        }
+    }
+    // Installe RustDesk comme service Windows (UAC une seule fois, idempotent via flag file)
+    const exePath = getRustDeskExePath()
+    if (exePath) await installRustDeskService(exePath)
+    configureRustDeskServer()
+    createRustDeskShortcutIfNeeded()
+    ensureRustDeskRunning()
+    // Tente la CLI si les fichiers de config ne sont pas encore lisibles
+    if (!getRustDeskId()) {
+        const cliId = await getRustDeskIdFromCLI()
+        if (cliId) _rustdeskIdCache = cliId
+    }
+    buildMenu()
+}
+
+async function installRustDeskService(exePath: string): Promise<void> {
+    if (fs.existsSync(RUSTDESK_SERVICE_FLAG)) return
+
+    const serviceExists = await new Promise<boolean>(resolve => {
+        exec('sc query RustDesk', err => resolve(!err))
+    })
+    if (serviceExists) {
+        try { fs.writeFileSync(RUSTDESK_SERVICE_FLAG, new Date().toISOString()) } catch { }
+        return
+    }
+
+    try { fs.mkdirSync(RUSTDESK_PORTABLE_DIR, { recursive: true }) } catch { }
+
+    // Écrit la config dans un fichier temporaire (évite les problèmes d'échappement dans PS1)
+    let tempTomlPath: string | null = null
+    const serviceConfigDir = 'C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Roaming\\RustDesk\\config'
+    if (RUSTDESK_SERVER && RUSTDESK_KEY) {
+        const toml = `[options]\ncustom-rendezvous-server = '${RUSTDESK_SERVER}'\nrelay-server = '${RUSTDESK_SERVER}'\nkey = '${RUSTDESK_KEY}'\napi-server = ''\napprove-mode = 'accept'\n`
+        tempTomlPath = path.join(RUSTDESK_PORTABLE_DIR, 'temp-svc-config.toml')
+        fs.writeFileSync(tempTomlPath, toml, 'utf-8')
+    }
+
+    const scriptLines = [
+        `& "${exePath}" --install-service`,
+        `Start-Sleep -Seconds 3`,
+    ]
+    if (tempTomlPath) {
+        scriptLines.push(
+            `New-Item -ItemType Directory -Force -Path "${serviceConfigDir}" | Out-Null`,
+            `Copy-Item -Path "${tempTomlPath}" -Destination "${serviceConfigDir}\\RustDesk2.toml" -Force`,
+            `Copy-Item -Path "${tempTomlPath}" -Destination "${serviceConfigDir}\\RustDesk.toml" -Force`,
+        )
+    }
+    scriptLines.push(`Start-Service RustDesk -ErrorAction SilentlyContinue`)
+
+    const scriptPath = path.join(RUSTDESK_PORTABLE_DIR, 'install-svc.ps1')
+    try { fs.writeFileSync(scriptPath, scriptLines.join('\r\n'), 'utf-8') } catch { return }
+
+    // Lance le script en élevé (UAC) — silencieux, attend la fin
+    const escapedScript = scriptPath.replace(/\\/g, '\\\\')
+    const psCmd = `Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NonInteractive -ExecutionPolicy Bypass -File "${escapedScript}"'`
+
+    await new Promise<void>(resolve => {
+        exec(`powershell.exe -NonInteractive -Command "${psCmd}"`, { timeout: 30000 }, () => {
+            if (tempTomlPath) try { fs.unlinkSync(tempTomlPath) } catch { }
+            try { fs.unlinkSync(scriptPath) } catch { }
+            // Vérifie si le service a bien été installé (indépendamment du code retour)
+            exec('sc query RustDesk', (queryErr) => {
+                if (!queryErr) {
+                    try { fs.writeFileSync(RUSTDESK_SERVICE_FLAG, new Date().toISOString()) } catch { }
+                    // Le service gère le démarrage auto — plus besoin de l'entrée tray dans le registre
+                    exec('reg delete "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run" /v RustDesk /f', () => { })
+                }
+                resolve()
+            })
+        })
+    })
+}
+
+function ensureRustDeskRunning(): void {
+    const exePath = getRustDeskExePath()
+    if (!exePath) return
+    // Essaie d'abord de démarrer le service Windows (silencieux, pas de fenêtre)
+    // Si le service est déjà en cours ou démarre → connexions acceptées sans GUI
+    exec('sc start RustDesk', (err) => {
+        if (!err) return // service démarré
+        // Service déjà actif (code 1056) ou pas de droits : lance le tray comme fallback
+        exec('tasklist /FI "IMAGENAME eq rustdesk.exe" /NH', (_e, stdout) => {
+            if (stdout.toLowerCase().includes('rustdesk.exe')) return // déjà en cours
+            spawn(exePath, ['--tray'], { detached: true, stdio: 'ignore' }).unref()
+        })
+    })
+}
+
+async function reportRustDeskHeartbeat(): Promise<void> {
+    let rustdeskId = getRustDeskId()
+    // Si pas en cache ni dans les fichiers lisibles, essaie la CLI (service IPC)
+    if (!rustdeskId) {
+        const cliId = await getRustDeskIdFromCLI()
+        if (cliId) {
+            _rustdeskIdCache = cliId
+            rustdeskId = cliId
+            buildMenu() // met à jour le label Support avec le nouvel ID
+        }
+    }
+    if (!rustdeskId) return
+
+    const config = readConfig()
+    if (!config.instance) return
+
+    const instanceUrl = config.freeInstance
+        ? (() => { try { return new URL(config.instance).hostname } catch { return config.instance } })()
+        : `${config.instance}.cieloo.io`
+
+    const { mac, ip } = getNetworkInfo()
+    const settings = loadSettings()
+
+    try {
+        await fetch(`${DASHBOARD_API_URL}/api/terminals/heartbeat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Terminal-Key': TERMINAL_API_KEY,
+            },
+            body: JSON.stringify({
+                instance_url: instanceUrl,
+                rustdesk_id: rustdeskId,
+                mac,
+                ip,
+                serial_number: settings.serialNumber || null,
+                terminal_name: settings.terminalName || null,
+            }),
+            signal: AbortSignal.timeout(5000),
+        })
+    } catch {
+        // fail silently — non-critical background task
+    }
+}
 
 // ─── Instance config ──────────────────────────────────────────────────────────
 
@@ -140,6 +412,7 @@ function loadOfflinePage(): void {
     }
 }
 let printSettingsWindow: BrowserWindow | null = null
+let barcodeSettingsWindow: BrowserWindow | null = null
 let secondDisplaySettingsWindow: BrowserWindow | null = null
 let loadingOverlayWindow: BrowserWindow | null = null
 let loadingOverlayShownAt = 0
@@ -150,59 +423,49 @@ const LOADING_OVERLAY_SIZE = 54
 const LOADING_OVERLAY_MARGIN = 16
 const LOADING_OVERLAY_TOP_OFFSET = 52
 
-function resolveCielooOrigin(): string | null {
-    const currentUrl = mainWindow?.webContents.getURL() ?? ''
-    if (isCielooUrl(currentUrl) || isFreeInstanceUrl(currentUrl)) {
-        try {
-            return new URL(currentUrl).origin
-        } catch {
-            return null
-        }
+// Base URL on which all Cieloo app paths are appended.
+// For a free instance the configured URL can include a sub-path
+// (ex. http://localhost/cieloo) — that prefix must be preserved, so we keep the
+// full configured URL (trailing slash stripped) instead of just the origin.
+function resolveCielooBase(): string | null {
+    const config = readConfig()
+
+    if (config.instance && config.freeInstance) {
+        try { return new URL(config.instance).href.replace(/\/+$/, '') } catch { return null }
     }
 
-    const config = readConfig()
-    if (!config.instance) return null
-    if (config.freeInstance) {
-        try { return new URL(config.instance).origin } catch { return null }
+    // Hosted instance: prefer the live cieloo.io URL, fall back to config.
+    const liveUrl = [mainWindow?.webContents.getURL() ?? '', lastCielooUrl].find(isCielooUrl)
+    if (liveUrl) {
+        try { return new URL(liveUrl).origin } catch { /* fall through */ }
     }
-    return `https://${config.instance}.cieloo.io`
+    if (config.instance) return `https://${config.instance}.cieloo.io`
+    return null
+}
+
+// Pure origin (scheme + host[:port]) — used for cookie scoping.
+function resolveCielooOrigin(): string | null {
+    const base = resolveCielooBase()
+    if (!base) return null
+    try { return new URL(base).origin } catch { return null }
 }
 
 function openCielooPath(pathname: string): void {
-    const origin = resolveCielooOrigin()
-    if (!origin) return
-    void mainWindow?.loadURL(`${origin}${pathname}`)
-}
-
-function resolveActiveCielooUrl(): string | null {
-    const currentUrl = mainWindow?.webContents.getURL() ?? ''
-    if (isCielooUrl(currentUrl)) return currentUrl
-    if (isCielooUrl(lastCielooUrl)) return lastCielooUrl
-    return resolveCielooOrigin()
+    const base = resolveCielooBase()
+    if (!base) return
+    void mainWindow?.loadURL(`${base}${pathname}`)
 }
 
 function resolveSecondScreenUrl(): string | null {
-    const activeUrl = resolveActiveCielooUrl()
-    if (!activeUrl) return null
-
-    try {
-        const { origin } = new URL(activeUrl)
-        return `${origin}/custom/cieloopos/secondscreen.php`
-    } catch {
-        return null
-    }
+    const base = resolveCielooBase()
+    if (!base) return null
+    return `${base}/custom/cieloopos/secondscreen.php`
 }
 
 function resolveSecondScreenEditorUrl(): string | null {
-    const activeUrl = resolveActiveCielooUrl()
-    if (!activeUrl) return null
-
-    try {
-        const { origin } = new URL(activeUrl)
-        return `${origin}/custom/cieloopos/admin/secondscreen_editor.php?focus=1`
-    } catch {
-        return null
-    }
+    const base = resolveCielooBase()
+    if (!base) return null
+    return `${base}/custom/cieloopos/admin/secondscreen_editor.php?focus=1`
 }
 
 function openSecondScreenFromMainWindow(): void {
@@ -571,17 +834,36 @@ function buildMenu(): void {
             label: 'Paramètres généraux',
             click: () => openSettingsWindow(isDev, process.env.ELECTRON_RENDERER_URL)
         },
+        { type: 'separator' },
         {
-            label: 'Paramètres d\'impression',
+            label: 'Imprimantes de Caisses',
             click: () => openPrintSettingsWindow()
         },
+        {
+            label: 'Imprimantes Codes Barres',
+            click: () => openBarcodeSettingsWindow()
+        },
+        { type: 'separator' },
         {
             label: 'Parametres second afficheur',
             click: () => openSecondDisplaySettingsWindow()
         }
     ]
 
+    const rustdeskId = getRustDeskId()
     const supportSubmenu: Electron.MenuItemConstructorOptions[] = [
+        {
+            label: rustdeskId ? `ID RustDesk : ${rustdeskId}` : 'ID RustDesk : non disponible',
+            enabled: false,
+        },
+        { type: 'separator' },
+        {
+            label: 'Lancer RustDesk',
+            click: () => {
+                const exePath = getRustDeskExePath()
+                if (exePath) spawn(exePath, [], { detached: true, stdio: 'ignore' }).unref()
+            }
+        },
         {
             label: 'Lancer AnyDesk',
             click: () => launchAnyDesk()
@@ -611,11 +893,60 @@ function buildMenu(): void {
         },
         { type: 'separator' },
         {
+            label: 'Ouvrir configuration nacef',
+            click: () => openTechConfigWindow()
+        },
+        {
+            label: 'Ouvrir config cieloopos',
+            click: () => openCielooPathInNewWindow('/custom/cieloopos/admin/setup.php', 'Config CielooPos')
+        },
+        { type: 'separator' },
+        {
+            label: 'Forcer config RustDesk',
+            click: () => {
+                applyRustDeskConfig().then((result) => {
+                    dialog.showMessageBox({
+                        title: 'Config RustDesk',
+                        message: result,
+                        detail: `ID actuel: ${getRustDeskId() ?? 'inconnu'}\nConfig baked: ${RUSTDESK_CONFIG ? RUSTDESK_CONFIG.slice(0, 20) + '...' : 'VIDE'}`,
+                    })
+                })
+            }
+        },
+        {
+            label: 'Test heartbeat dashboard',
+            click: () => {
+                reportRustDeskHeartbeat().then(() => {
+                    dialog.showMessageBox({ title: 'Heartbeat', message: `ID: ${getRustDeskId() ?? 'introuvable'}\nURL: ${DASHBOARD_API_URL}\nRequête envoyée — vérifiez les logs du serveur.` })
+                })
+            }
+        },
+        { type: 'separator' },
+        {
             label: 'Outils développeurs',
             accelerator: sc.devtools,
             click: () => toggleFocusedWindowDevTools()
         }
     ]
+
+    // En-tete : URL de la page (cliquer pour copier). On la tronque au milieu pour
+    // ne jamais depasser la largeur du plus long autre item du menu.
+    const currentPageUrl = mainWindow?.webContents.getURL() ?? ''
+    const widestLabel = Math.max(
+        ...devSubmenu.map(item => (typeof item.label === 'string' ? item.label.length : 0))
+    )
+    const maxUrlChars = Math.max(0, widestLabel - 'URL : '.length)
+    const shortUrl = currentPageUrl.length > maxUrlChars && maxUrlChars > 3
+        ? `${currentPageUrl.slice(0, Math.ceil((maxUrlChars - 1) / 2))}…${currentPageUrl.slice(-Math.floor((maxUrlChars - 1) / 2))}`
+        : currentPageUrl
+    devSubmenu.unshift(
+        {
+            label: currentPageUrl ? `URL : ${shortUrl}` : 'URL : (aucune page chargée)',
+            enabled: false, // item passif/grise (pas un bouton)
+            toolTip: currentPageUrl || undefined, // URL complete au survol
+        },
+        { type: 'separator' }
+    )
 
     const menuTemplate: Electron.MenuItemConstructorOptions[] = [
         { label: 'Caisse', submenu: caisseSubmenu },
@@ -646,7 +977,7 @@ function openPrintSettingsWindow(): void {
         minWidth: 700,
         minHeight: 560,
         icon: resolveAppIcon(),
-        title: 'Parametres d\'impression - CielooPos',
+        title: 'Imprimantes de Caisses - CielooPos',
         backgroundColor: '#f3f5f8',
         show: false,
         parent: parentWindow,
@@ -676,6 +1007,53 @@ function openPrintSettingsWindow(): void {
         void printSettingsWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/print-settings.html`)
     } else {
         void printSettingsWindow.loadFile(path.join(__dirname, '../renderer/print-settings.html'))
+    }
+}
+
+function openBarcodeSettingsWindow(): void {
+    if (barcodeSettingsWindow && !barcodeSettingsWindow.isDestroyed()) {
+        barcodeSettingsWindow.focus()
+        return
+    }
+
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+    barcodeSettingsWindow = new BrowserWindow({
+        width: 760,
+        height: 620,
+        minWidth: 700,
+        minHeight: 560,
+        icon: resolveAppIcon(),
+        title: 'Imprimantes Codes Barres - CielooPos',
+        backgroundColor: '#f3f5f8',
+        show: false,
+        parent: parentWindow,
+        webPreferences: {
+            preload: path.join(__dirname, '../preload/index.js'),
+            contextIsolation: true,
+            sandbox: false,
+            nodeIntegration: false,
+            spellcheck: false,
+        },
+    })
+
+    barcodeSettingsWindow.setMenu(null)
+    barcodeSettingsWindow.webContents.on('before-input-event', (_e, input) => {
+        if (input.key === 'F12' && input.type === 'keyDown') {
+            barcodeSettingsWindow?.webContents.toggleDevTools()
+        }
+    })
+    barcodeSettingsWindow.once('ready-to-show', () => {
+        barcodeSettingsWindow?.show()
+    })
+    barcodeSettingsWindow.on('closed', () => {
+        barcodeSettingsWindow = null
+    })
+
+    if (isDev && process.env.ELECTRON_RENDERER_URL) {
+        void barcodeSettingsWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/barcode-settings.html`)
+    } else {
+        void barcodeSettingsWindow.loadFile(path.join(__dirname, '../renderer/barcode-settings.html'))
     }
 }
 
@@ -722,6 +1100,48 @@ function openSecondDisplaySettingsWindow(): void {
 }
 
 let contactWindow: BrowserWindow | null = null
+let techConfigWindow: BrowserWindow | null = null
+
+// Ouvre un chemin de l'app Cieloo (relatif à la base) dans une nouvelle webview.
+function openCielooPathInNewWindow(pathname: string, title: string): void {
+    const base = resolveCielooBase()
+    if (!base) {
+        void dialog.showMessageBox({
+            type: 'warning',
+            title,
+            message: 'Instance Cieloo introuvable.',
+            detail: 'Ouvrez d abord votre instance Cieloo dans la fenetre principale, puis relancez.',
+        })
+        return
+    }
+
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+    const win = new BrowserWindow({
+        width: 1280,
+        height: 820,
+        minWidth: 900,
+        minHeight: 600,
+        icon: resolveAppIcon(),
+        title: `${title} - CielooPos`,
+        backgroundColor: '#ffffff',
+        show: false,
+        parent: parentWindow,
+        webPreferences: {
+            preload: path.join(__dirname, '../preload/index.js'),
+            contextIsolation: true,
+            sandbox: false,
+            nodeIntegration: false,
+            webSecurity: true,
+            spellcheck: false,
+        },
+    })
+
+    win.webContents.setWindowOpenHandler(({ url }) => handleWindowOpen(url))
+    lockNavigation(win.webContents)
+    win.once('ready-to-show', () => win.show())
+    void win.loadURL(`${base}${pathname}`)
+}
 
 function openContactWindow(): void {
     if (contactWindow && !contactWindow.isDestroyed()) { contactWindow.focus(); return }
@@ -755,6 +1175,42 @@ function openContactWindow(): void {
         void contactWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/contact.html`)
     } else {
         void contactWindow.loadFile(path.join(__dirname, '../renderer/contact.html'))
+    }
+}
+
+function openTechConfigWindow(): void {
+    if (techConfigWindow && !techConfigWindow.isDestroyed()) {
+        techConfigWindow.focus()
+        return
+    }
+
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+    techConfigWindow = new BrowserWindow({
+        width: 620,
+        height: 500,
+        icon: resolveAppIcon(),
+        title: 'Configuration technique — CielooPos',
+        backgroundColor: '#f8fafc',
+        show: false,
+        resizable: false,
+        parent: parentWindow,
+        webPreferences: {
+            preload: path.join(__dirname, '../preload/index.js'),
+            contextIsolation: true,
+            sandbox: false,
+            nodeIntegration: false,
+        }
+    })
+
+    techConfigWindow.setMenu(null)
+    techConfigWindow.once('ready-to-show', () => techConfigWindow?.show())
+    techConfigWindow.on('closed', () => { techConfigWindow = null })
+
+    if (isDev && process.env.ELECTRON_RENDERER_URL) {
+        void techConfigWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/tech-config.html`)
+    } else {
+        void techConfigWindow.loadFile(path.join(__dirname, '../renderer/tech-config.html'))
     }
 }
 
@@ -981,7 +1437,7 @@ window.print=function(){
     window.dispatchEvent(new Event('afterprint'));
   });
 };
-})()`).catch(() => {})
+})()`).catch(() => { })
     })
 
     // Loading indicator — taskbar progress bar only (no title pollution)
@@ -1011,6 +1467,7 @@ window.print=function(){
         // Track last known good cieloo URL for offline recovery
         if (isCielooUrl(url) || isFreeInstanceUrl(url)) lastCielooUrl = url
         syncSecondScreenWhenMainIsVisible()
+        if (isDev || loadSettings().devMode) buildMenu() // refresh Dev > URL label
     })
 
     mainWindow.webContents.on('did-navigate-in-page', (_e, url) => {
@@ -1019,6 +1476,7 @@ window.print=function(){
         injectRuntimeCss(mainWindow.webContents, url)
         if (isCielooUrl(url) || isFreeInstanceUrl(url)) lastCielooUrl = url
         syncSecondScreenWhenMainIsVisible()
+        if (isDev || loadSettings().devMode) buildMenu() // refresh Dev > URL label
     })
 
     // Some pages use HTML5 fullscreen (requestFullscreen). On small POS displays,
@@ -1107,6 +1565,8 @@ function registerIpc(): void {
             writeConfig({ ...existing, instance: clean })
             void mainWindow?.loadURL(`https://${clean}.cieloo.io`)
         }
+        // Heartbeat immédiat après configuration de l'instance
+        void reportRustDeskHeartbeat()
     })
 
     ipcMain.handle('config:toggle-free-instance', () => {
@@ -1198,7 +1658,31 @@ function registerIpc(): void {
         }
     })
 
+    ipcMain.handle('print:print-barcode-test', async (_e, config, mode: BarcodeTestMode) => {
+        try {
+            await printBarcodeTestPage(config, mode === 'sheet' ? 'sheet' : 'label')
+            return { success: true }
+        } catch (error) {
+            return { success: false, message: error instanceof Error ? error.message : 'Erreur inconnue' }
+        }
+    })
+
     ipcMain.handle('print:open-settings', () => openPrintSettingsWindow())
+
+    ipcMain.handle('print:open-barcode-settings', () => openBarcodeSettingsWindow())
+
+    // Téléchargement d'un driver d'imprimante depuis une URL (ouvre le navigateur → DL)
+    ipcMain.handle('print:download-driver', async (_e, url: string) => {
+        if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
+            return { launched: false, reason: 'invalid_url' }
+        }
+        try {
+            await shell.openExternal(url)
+            return { launched: true }
+        } catch (error) {
+            return { launched: false, reason: error instanceof Error ? error.message : 'error' }
+        }
+    })
 
     ipcMain.handle('print:open-printer-properties', (_e, printerName: string) => {
         if (!printerName) return
@@ -1231,19 +1715,17 @@ function registerIpc(): void {
     async function multiprintCookieHeader(origin: string): Promise<string> {
         const cookies = await session.defaultSession.cookies.get({ url: origin })
         const header = cookies.map(c => `${c.name}=${c.value}`).join('; ')
-        console.log(`[MultiPrint] ${cookies.length} cookie(s) trouvé(s) pour ${origin}`)
         return header
     }
 
     ipcMain.handle('multiprint:get-sections', async (): Promise<{ sections: unknown[] | null; error?: string }> => {
+        const base = resolveCielooBase()
         const origin = resolveCielooOrigin()
-        if (!origin) {
-            console.error('[MultiPrint GET] Instance Dolibarr non détectée (aucune URL Cieloo chargée)')
+        if (!base || !origin) {
             return { sections: null, error: 'Instance Dolibarr non détectée' }
         }
-        const url = `${origin}/custom/cieloopos/api/multiprint_api.php`
+        const url = `${base}/custom/cieloopos/api/multiprint_api.php`
         const cookieHeader = await multiprintCookieHeader(origin)
-        console.log(`[MultiPrint GET] → ${url}`)
         return new Promise((resolve) => {
             const req = net.request({ method: 'GET', url })
             if (cookieHeader) req.setHeader('Cookie', cookieHeader)
@@ -1251,7 +1733,6 @@ function registerIpc(): void {
             req.on('response', (res) => {
                 res.on('data', (chunk) => { body += chunk.toString() })
                 res.on('end', () => {
-                    console.log(`[MultiPrint GET] HTTP ${res.statusCode} — body: ${body.slice(0, 500)}`)
                     try {
                         const parsed = JSON.parse(body) as { sections?: unknown[] }
                         if (res.statusCode !== 200) {
@@ -1260,13 +1741,11 @@ function registerIpc(): void {
                             resolve({ sections: parsed.sections ?? null })
                         }
                     } catch {
-                        console.error(`[MultiPrint GET] Réponse non-JSON: ${body.slice(0, 300)}`)
                         resolve({ sections: null, error: `Réponse non-JSON (HTTP ${res.statusCode}): ${body.slice(0, 150)}` })
                     }
                 })
             })
             req.on('error', (e: Error) => {
-                console.error(`[MultiPrint GET] Erreur réseau: ${e.message}`)
                 resolve({ sections: null, error: e.message })
             })
             req.end()
@@ -1318,6 +1797,50 @@ function registerIpc(): void {
     ipcMain.handle('app:version', () => app.getVersion())
     ipcMain.handle('app:is-dev', () => isDev)
 
+    const TECH_PORTS = [10004, 10006]
+    type PortInfo = { port: number; pid: number | null; processName: string | null; listening: boolean }
+
+    ipcMain.handle('tech:get-port-info', (): Promise<PortInfo[]> => {
+        return new Promise((resolve) => {
+            exec('netstat -ano', { windowsHide: true }, (err, stdout) => {
+                const results: PortInfo[] = TECH_PORTS.map(port => ({ port, pid: null, processName: null, listening: false }))
+                if (err) { resolve(results); return }
+
+                for (const result of results) {
+                    const match = stdout.match(new RegExp(`TCP\\s+[\\d.*]+:${result.port}\\s+\\S+\\s+LISTENING\\s+(\\d+)`, 'i'))
+                    if (match) { result.listening = true; result.pid = parseInt(match[1]) }
+                }
+
+                const pids = results.filter(r => r.pid !== null).map(r => r.pid!)
+                if (pids.length === 0) { resolve(results); return }
+
+                const psCmd = `powershell -NoProfile -NonInteractive -Command "Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | Select-Object Id,Name | ConvertTo-Json -Compress"`
+                exec(psCmd, { windowsHide: true }, (_e2, out2) => {
+                    try {
+                        const raw = JSON.parse(out2.trim()) as unknown
+                        const list: Array<{ Id: number; Name: string }> = Array.isArray(raw) ? raw as Array<{ Id: number; Name: string }> : [raw as { Id: number; Name: string }]
+                        for (const result of results) {
+                            const entry = list.find(p => p.Id === result.pid)
+                            if (entry) result.processName = entry.Name
+                        }
+                    } catch { /* processName reste null */ }
+                    resolve(results)
+                })
+            })
+        })
+    })
+
+    ipcMain.handle('tech:ping-nacef', (_e, port: number): Promise<{ available: boolean; statusCode?: number; error?: string }> => {
+        return new Promise((resolve) => {
+            const req = http.get({ hostname: '127.0.0.1', port, path: '/', timeout: 3000 }, (res) => {
+                res.resume()
+                resolve({ available: true, statusCode: res.statusCode })
+            })
+            req.on('timeout', () => { req.destroy(); resolve({ available: false, error: 'timeout' }) })
+            req.on('error', (err) => resolve({ available: false, error: err.message }))
+        })
+    })
+
     let splashClaimed = false
     ipcMain.handle('app:claim-splash', () => {
         if (splashClaimed) return false
@@ -1349,6 +1872,25 @@ app.whenReady().then(async () => {
     registerUpdaterIpc()
     createMainWindow()
     initAutoUpdater(() => mainWindow)
+
+    installRustDeskIfNeeded().then(async () => {
+        // Essaie immédiatement, puis toutes les 15s jusqu'à obtenir l'ID, ensuite toutes les 60s
+        let found = false
+        const tryHeartbeat = async (): Promise<void> => {
+            await reportRustDeskHeartbeat()
+            found = !!getRustDeskId()
+        }
+        await tryHeartbeat()
+        if (!found) {
+            // Retry rapide pendant 2 minutes le temps que le service RustDesk redémarre
+            const retryInterval = setInterval(async () => {
+                await tryHeartbeat()
+                if (found) clearInterval(retryInterval)
+            }, 15_000)
+            setTimeout(() => clearInterval(retryInterval), 2 * 60 * 1000)
+        }
+    })
+    setInterval(() => void reportRustDeskHeartbeat(), 60_000)
 
     // Alt+Enter as secondary fullscreen shortcut (not expressible as a single menu accelerator)
     globalShortcut.register('Alt+Return', () => {

@@ -1,5 +1,5 @@
 appId: io.cieloo.cieloopos
-productName: CielooPos
+productName: CaisLà
 directories:
   output: release
 compression: maximum
@@ -16,6 +16,8 @@ extraResources:
     filter:
       - SumatraPDF-settings.txt
       - AnyDesk.exe
+      - RustDesk.exe
+      - E001_POS.driver.2025.09.28.01.exe
   - from: assets/img
     to: assets/img
 win:

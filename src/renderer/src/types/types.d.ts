@@ -48,10 +48,13 @@ declare global {
                 saveConfig: (print: Partial<PrintSettings>) => Promise<{ config: PrintSettings; status: PrintServerStatus }>
                 printerCheck: () => Promise<{ configured: boolean; connected: boolean }>
                 printTest: (config: PrinterConfig) => Promise<{ success: boolean; message?: string }>
+                printBarcodeTest: (config: PrinterConfig, mode: 'label' | 'sheet') => Promise<{ success: boolean; message?: string }>
                 openPrinterProperties: (printerName: string) => Promise<void>
                 openPrinterOptions: (printerName: string) => Promise<void>
                 installDriver: () => Promise<{ launched: boolean; reason?: string }>
+                downloadDriver: (url: string) => Promise<{ launched: boolean; reason?: string }>
                 openSettings: () => Promise<void>
+                openBarcodeSettings: () => Promise<void>
             }
             nav: {
                 goBack: () => Promise<void>
