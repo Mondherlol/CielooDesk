@@ -1,7 +1,7 @@
 
 export { }
 
-import type { AppSettings, ShortcutMap, PrintSettings, PrinterConfig } from '../../../modules/settings/main'
+import type { AppSettings, ShortcutMap, PrintSettings, PrinterConfig, CustomerDisplaySettings } from '../../../modules/settings/main'
 import type { PrintServerStatus } from '../../../modules/print-server/main'
 
 export type MultiprintSection = {
@@ -41,6 +41,12 @@ declare global {
                 selectMediaFolder: () => Promise<string | null>
                 clearMediaFolder: () => Promise<void>
             }
+            customerDisplay: {
+                listPorts: () => Promise<Array<{ path: string; label: string }>>
+                getConfig: () => Promise<CustomerDisplaySettings>
+                saveConfig: (config: Partial<CustomerDisplaySettings>) => Promise<CustomerDisplaySettings>
+                send: (line1: string, line2: string, override?: Partial<CustomerDisplaySettings>) => Promise<{ success: boolean; message?: string }>
+            }
             print: {
                 getPrinters: () => Promise<Array<{ name: string; isDefault: boolean }>>
                 getConfig: () => Promise<PrintSettings>
@@ -69,6 +75,12 @@ declare global {
             app: {
                 version: () => Promise<string>
                 isDev: () => Promise<boolean>
+            }
+            dev: {
+                copyText: (text: string) => Promise<void>
+                navigate: (url: string) => Promise<void>
+                closeUrlEditor: () => Promise<void>
+                onSetUrl: (cb: (url: string) => void) => void
             }
             device: {
                 getNetworkInfo: () => Promise<{ mac: string; ip: string }>

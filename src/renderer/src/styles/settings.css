@@ -445,6 +445,25 @@ body {
     flex-wrap: wrap;
 }
 
+/* ─── Aperçu afficheur client VFD (pixels verts sur fond noir) ──────────────────── */
+
+.cd-preview {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    background: #000;
+    border-radius: 6px;
+    border: 1px solid #1f2937;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: .92rem;
+    line-height: 1.25;
+    letter-spacing: 1px;
+    color: #33ff66;
+    text-shadow: 0 0 4px rgba(51, 255, 102, .55);
+    white-space: pre;
+}
+
 /* ─── Credentials row ────────────────────────────────────────────────────────── */
 
 .creds-status {

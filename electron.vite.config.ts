@@ -36,7 +36,9 @@ export default defineConfig(({ mode }) => {
                     // Offline fallback page (shown when network fails during navigation)
                     offline: resolve('src/renderer/offline.html'),
                     // Support contact page
-                    contact: resolve('src/renderer/contact.html')
+                    contact: resolve('src/renderer/contact.html'),
+                    // URL editor (Dev menu)
+                    urlEditor: resolve('src/renderer/url-editor.html')
                 }
             }
         }

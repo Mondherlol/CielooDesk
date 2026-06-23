@@ -23,6 +23,7 @@ import {
 } from '../modules/print-server/main'
 import { startSecondScreen, syncSecondScreen } from '../modules/second-screen/main'
 import { initAutoUpdater, registerUpdaterIpc } from '../modules/updater/main'
+import { registerCustomerDisplayIpc, pushIdleText } from '../modules/customer-display/main'
 
 const isDev = !app.isPackaged
 
@@ -390,6 +391,19 @@ const NET_ERROR_CODES = new Set([-21, -100, -101, -102, -105, -106, -109, -118, 
 
 const BASE_PAGE_RESET_CSS = 'html,body{margin:0!important;padding:0!important;border:0!important}'
 const CIELOO_FULLSCREEN_OVERFLOW_FIX_CSS = 'html,body{max-width:100%!important;overflow-x:hidden!important}'
+
+// Capte le BroadcastChannel 'cieloopos_cart' (déjà émis par le POS pour le second
+// écran) et relaie l'état du panier au preload via postMessage → afficheur client.
+// Injecté dans le MAIN world via executeJavaScript (donc non bloqué par la CSP).
+const CUSTOMER_DISPLAY_CART_HOOK = `(function(){
+    if (window.__cielooVfdHook) return; window.__cielooVfdHook = true;
+    try {
+        var bc = new BroadcastChannel('cieloopos_cart');
+        bc.onmessage = function(ev){
+            try { window.postMessage({ __cielooVfd: true, cart: ev.data }, '*'); } catch(e){}
+        };
+    } catch(e){}
+})();`
 
 function enforceStableWebViewRendering(wc: Electron.WebContents): void {
     wc.setZoomFactor(1)
@@ -929,21 +943,22 @@ function buildMenu(): void {
         }
     ]
 
-    // En-tete : URL de la page (cliquer pour copier). On la tronque au milieu pour
-    // ne jamais depasser la largeur du plus long autre item du menu.
+    // En-tete : URL de la page. On garde le DEBUT et on coupe la fin (ellipse a droite)
+    // pour ne jamais depasser la largeur du plus long autre item du menu.
     const currentPageUrl = mainWindow?.webContents.getURL() ?? ''
     const widestLabel = Math.max(
         ...devSubmenu.map(item => (typeof item.label === 'string' ? item.label.length : 0))
     )
     const maxUrlChars = Math.max(0, widestLabel - 'URL : '.length)
-    const shortUrl = currentPageUrl.length > maxUrlChars && maxUrlChars > 3
-        ? `${currentPageUrl.slice(0, Math.ceil((maxUrlChars - 1) / 2))}…${currentPageUrl.slice(-Math.floor((maxUrlChars - 1) / 2))}`
+    const shortUrl = currentPageUrl.length > maxUrlChars && maxUrlChars > 1
+        ? `${currentPageUrl.slice(0, maxUrlChars - 1)}…`
         : currentPageUrl
     devSubmenu.unshift(
         {
             label: currentPageUrl ? `URL : ${shortUrl}` : 'URL : (aucune page chargée)',
-            enabled: false, // item passif/grise (pas un bouton)
+            enabled: !!currentPageUrl,
             toolTip: currentPageUrl || undefined, // URL complete au survol
+            click: () => openUrlEditorWindow(),
         },
         { type: 'separator' }
     )
@@ -1141,6 +1156,52 @@ function openCielooPathInNewWindow(pathname: string, title: string): void {
     lockNavigation(win.webContents)
     win.once('ready-to-show', () => win.show())
     void win.loadURL(`${base}${pathname}`)
+}
+
+let urlEditorWindow: BrowserWindow | null = null
+
+// Petite fenetre (menu Dev) : input pour voir / modifier / copier l'URL courante.
+function openUrlEditorWindow(): void {
+    const currentUrl = mainWindow?.webContents.getURL() ?? ''
+
+    if (urlEditorWindow && !urlEditorWindow.isDestroyed()) {
+        urlEditorWindow.webContents.send('url-editor:set', currentUrl)
+        urlEditorWindow.focus()
+        return
+    }
+
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+    urlEditorWindow = new BrowserWindow({
+        width: 560,
+        height: 200,
+        resizable: false,
+        minimizable: false,
+        maximizable: false,
+        icon: resolveAppIcon(),
+        title: 'URL de la page — CielooPos',
+        backgroundColor: '#f8fafc',
+        show: false,
+        parent: parentWindow,
+        modal: false,
+        webPreferences: {
+            preload: path.join(__dirname, '../preload/index.js'),
+            contextIsolation: true,
+            sandbox: false,
+            nodeIntegration: false,
+        }
+    })
+
+    urlEditorWindow.setMenu(null)
+    urlEditorWindow.once('ready-to-show', () => urlEditorWindow?.show())
+    urlEditorWindow.on('closed', () => { urlEditorWindow = null })
+
+    const query = `?url=${encodeURIComponent(currentUrl)}`
+    if (isDev && process.env.ELECTRON_RENDERER_URL) {
+        void urlEditorWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/url-editor.html${query}`)
+    } else {
+        void urlEditorWindow.loadFile(path.join(__dirname, '../renderer/url-editor.html'), { search: query })
+    }
 }
 
 function openContactWindow(): void {
@@ -1458,6 +1519,9 @@ window.print=function(){
         enforceStableWebViewRendering(mainWindow.webContents)
         injectRuntimeCss(mainWindow.webContents, currentUrl)
         syncSecondScreenWhenMainIsVisible(true)
+        if (isCielooUrl(currentUrl) || isFreeInstanceUrl(currentUrl)) {
+            void mainWindow.webContents.executeJavaScript(CUSTOMER_DISPLAY_CART_HOOK)
+        }
     })
 
     mainWindow.webContents.on('did-navigate', (_e, url) => {
@@ -1601,6 +1665,7 @@ function registerIpc(): void {
 
     registerAutoLoginIpc()
     registerSettingsIpc(isDev, process.env.ELECTRON_RENDERER_URL, () => mainWindow)
+    registerCustomerDisplayIpc()
     onRebuildMenu(buildMenu)
 
     // ── Impression (CielooPrint local server) ───────────────────────────────
@@ -1797,6 +1862,16 @@ function registerIpc(): void {
     ipcMain.handle('app:version', () => app.getVersion())
     ipcMain.handle('app:is-dev', () => isDev)
 
+    // ── Editeur d'URL (menu Dev) ────────────────────────────────────────────────
+    ipcMain.handle('dev:copy-text', (_e, text: string) => clipboard.writeText(text ?? ''))
+    ipcMain.handle('dev:navigate', (_e, url: string) => {
+        if (url) void mainWindow?.loadURL(url)
+        if (urlEditorWindow && !urlEditorWindow.isDestroyed()) urlEditorWindow.close()
+    })
+    ipcMain.handle('dev:close-url-editor', () => {
+        if (urlEditorWindow && !urlEditorWindow.isDestroyed()) urlEditorWindow.close()
+    })
+
     const TECH_PORTS = [10004, 10006]
     type PortInfo = { port: number; pid: number | null; processName: string | null; listening: boolean }
 
@@ -1872,6 +1947,9 @@ app.whenReady().then(async () => {
     registerUpdaterIpc()
     createMainWindow()
     initAutoUpdater(() => mainWindow)
+
+    // Affiche le texte par défaut sur l'afficheur client (si activé)
+    void pushIdleText()
 
     installRustDeskIfNeeded().then(async () => {
         // Essaie immédiatement, puis toutes les 15s jusqu'à obtenir l'ID, ensuite toutes les 60s

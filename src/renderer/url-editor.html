@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>URL de la page - CielooPos</title>
+  <link rel="icon" href="/favicon.ico" />
+  <script type="module" src="/src/url-editor.ts"></script>
+</head>
+<body>
+  <main class="ue-shell">
+    <label class="ue-label" for="ue-input">URL de la page</label>
+    <input id="ue-input" class="ue-input" type="text" spellcheck="false" autocomplete="off" />
+    <div class="ue-actions">
+      <button id="ue-copy" class="ue-btn ue-btn-default">Copier</button>
+      <button id="ue-go" class="ue-btn ue-btn-primary">Ouvrir cette URL</button>
+      <button id="ue-close" class="ue-btn ue-btn-ghost">Fermer</button>
+    </div>
+    <div class="ue-toast" id="ue-toast"></div>
+  </main>
+</body>
+</html>

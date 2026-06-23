@@ -43,6 +43,22 @@ export interface ShortcutMap {
     devtools: string
 }
 
+/** Afficheur client VFD (pole display 2x20, ex. SAGA) piloté en série (COM). */
+export type CustomerDisplayProtocol = 'cd5220' | 'esc-pos' | 'plain'
+
+export interface CustomerDisplaySettings {
+    enabled: boolean
+    /** Chemin du port série, ex. "COM3" ('' si non configuré) */
+    port: string
+    baudRate: number
+    protocol: CustomerDisplayProtocol
+    /** Nombre de caractères par ligne (typiquement 20) */
+    columns: number
+    /** Texte affiché par défaut (au repos) */
+    line1: string
+    line2: string
+}
+
 export interface AppSettings {
     autoLogin: boolean
     fullscreen: boolean
@@ -53,6 +69,7 @@ export interface AppSettings {
     spinnerPosition: SpinnerPosition
     shortcuts: ShortcutMap
     print: PrintSettings
+    customerDisplay: CustomerDisplaySettings
     requirePrinter: boolean
     serialNumber: string
     terminalName: string
@@ -80,6 +97,15 @@ const DEFAULTS: AppSettings = {
     serialNumber: '',
     terminalName: '',
     devMode: false,
+    customerDisplay: {
+        enabled: false,
+        port: '',
+        baudRate: 9600,
+        protocol: 'cd5220',
+        columns: 20,
+        line1: 'Bienvenue',
+        line2: 'Powered by CaisLà',
+    },
     print: {
         enabled: true,
         port: 9100,
@@ -194,6 +220,23 @@ export function normalizePrintSettings(value: Partial<PrintSettings> | undefined
     }
 }
 
+const CUSTOMER_DISPLAY_PROTOCOLS: CustomerDisplayProtocol[] = ['cd5220', 'esc-pos', 'plain']
+
+export function normalizeCustomerDisplay(value: Partial<CustomerDisplaySettings> | undefined): CustomerDisplaySettings {
+    const protocol = CUSTOMER_DISPLAY_PROTOCOLS.includes(value?.protocol as CustomerDisplayProtocol)
+        ? value!.protocol as CustomerDisplayProtocol
+        : 'cd5220'
+    return {
+        enabled: value?.enabled === true,
+        port: typeof value?.port === 'string' ? value.port.trim().slice(0, 64) : '',
+        baudRate: clampInt(value?.baudRate, 300, 921600, 9600),
+        protocol,
+        columns: clampInt(value?.columns, 8, 40, 20),
+        line1: typeof value?.line1 === 'string' ? value.line1.slice(0, 40) : '',
+        line2: typeof value?.line2 === 'string' ? value.line2.slice(0, 40) : '',
+    }
+}
+
 function mergeWithDefaults(parsed: Partial<AppSettings> & { secondScreen?: unknown }): AppSettings {
     const { secondScreen: _legacySecondScreen, ...rest } = parsed
     const rawMediaFolder = rest.secondDisplayMediaFolder
@@ -207,6 +250,7 @@ function mergeWithDefaults(parsed: Partial<AppSettings> & { secondScreen?: unkno
             : null,
         shortcuts: { ...DEFAULT_SHORTCUTS, ...(rest.shortcuts ?? {}) },
         print: normalizePrintSettings(rest.print),
+        customerDisplay: normalizeCustomerDisplay(rest.customerDisplay),
     }
 }
 
@@ -245,6 +289,13 @@ export function setPrintSettings(print: Partial<PrintSettings>): AppSettings {
     return updateSettings((current) => ({
         ...current,
         print: normalizePrintSettings({ ...current.print, ...print }),
+    }))
+}
+
+export function setCustomerDisplaySettings(cd: Partial<CustomerDisplaySettings>): AppSettings {
+    return updateSettings((current) => ({
+        ...current,
+        customerDisplay: normalizeCustomerDisplay({ ...current.customerDisplay, ...cd }),
     }))
 }
 

@@ -25,6 +25,9 @@
     <button class="sidebar-item" data-tab="personnalisations">
       <i data-lucide="paintbrush-vertical" class="sidebar-item-icon"></i> Personnalisations
     </button>
+    <button class="sidebar-item" data-tab="afficheur-client">
+      <i data-lucide="type" class="sidebar-item-icon"></i> Afficheur client
+    </button>
 
     <div class="sidebar-version" id="sidebar-version">V. 0.1</div>
   </nav>
@@ -82,6 +85,115 @@
             <button class="btn btn-ghost" id="btn-clear-second-display-media-folder">
               Effacer
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-afficheur-client" class="settings-tab">
+      <h2 class="tab-title">Afficheur client (VFD)</h2>
+
+      <div class="section">
+        <p class="section-title">Connexion</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Activer l'afficheur client</span>
+            <span class="setting-desc">Petit afficheur 2 lignes (pixels verts, ex. SAGA) branché en port série / USB</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="cd-enabled" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Port série (COM)</span>
+            <span class="setting-desc">Sélectionnez le port sur lequel l'afficheur est branché</span>
+          </div>
+          <div class="setting-actions">
+            <select class="setting-select" id="cd-port"></select>
+            <button class="btn btn-ghost" id="cd-refresh-ports">Rafraîchir</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Vitesse (baud)</span>
+            <span class="setting-desc">9600 dans la majorité des cas</span>
+          </div>
+          <select class="setting-select" id="cd-baud">
+            <option value="2400">2400</option>
+            <option value="4800">4800</option>
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="115200">115200</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Protocole</span>
+            <span class="setting-desc">CD5220 fonctionne avec la plupart des afficheurs SAGA. Essayez les autres si rien ne s'affiche.</span>
+          </div>
+          <select class="setting-select" id="cd-protocol">
+            <option value="cd5220">CD5220 (recommandé)</option>
+            <option value="esc-pos">ESC/POS</option>
+            <option value="plain">Texte brut</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Colonnes par ligne</span>
+            <span class="setting-desc">Largeur de l'afficheur en caractères (souvent 20)</span>
+          </div>
+          <input class="setting-input" id="cd-columns" type="number" min="8" max="40" step="1" style="width:90px" />
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Texte à afficher</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Texte au repos</span>
+            <span class="setting-desc">Message affiché quand le panier est vide</span>
+          </div>
+          <button class="btn btn-ghost" id="cd-reset-text">Remettre par défaut</button>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Ligne 1</span>
+          </div>
+          <input class="setting-input" id="cd-line1" type="text" maxlength="40" placeholder="Bienvenue chez ..." />
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Ligne 2</span>
+          </div>
+          <input class="setting-input" id="cd-line2" type="text" maxlength="40" placeholder="Powered by CaisLà" />
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Aperçu</span>
+            <span class="setting-desc">Rendu approximatif (largeur = colonnes configurées)</span>
+          </div>
+          <div class="cd-preview" id="cd-preview"><span id="cd-preview-l1"></span><span id="cd-preview-l2"></span></div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Envoyer sur l'afficheur</span>
+            <span class="setting-desc">Enregistre la configuration puis affiche le texte ci-dessus</span>
+          </div>
+          <div class="setting-actions">
+            <button class="btn btn-default" id="cd-send">Envoyer / Tester</button>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { initAutoLoginPreload } from '../modules/auto-login/preload'
-import type { AppSettings, PrintSettings } from '../modules/settings/main'
+import type { AppSettings, PrintSettings, CustomerDisplaySettings } from '../modules/settings/main'
 import type { PrintServerStatus } from '../modules/print-server/main'
 
 // ─── IPC Bridge ───────────────────────────────────────────────────────────────
@@ -53,6 +53,17 @@ contextBridge.exposeInMainWorld('cieloo', {
             ipcRenderer.invoke('second-display:select-media-folder'),
         clearMediaFolder: (): Promise<void> =>
             ipcRenderer.invoke('second-display:clear-media-folder'),
+    },
+
+    customerDisplay: {
+        listPorts: (): Promise<Array<{ path: string; label: string }>> =>
+            ipcRenderer.invoke('customer-display:list-ports'),
+        getConfig: (): Promise<CustomerDisplaySettings> =>
+            ipcRenderer.invoke('customer-display:get-config'),
+        saveConfig: (config: Partial<CustomerDisplaySettings>): Promise<CustomerDisplaySettings> =>
+            ipcRenderer.invoke('customer-display:save-config', config),
+        send: (line1: string, line2: string, override?: Partial<CustomerDisplaySettings>): Promise<{ success: boolean; message?: string }> =>
+            ipcRenderer.invoke('customer-display:send', line1, line2, override),
     },
 
     print: {
@@ -113,6 +124,15 @@ contextBridge.exposeInMainWorld('cieloo', {
         isDev: (): Promise<boolean> => ipcRenderer.invoke('app:is-dev'),
     },
 
+    dev: {
+        copyText: (text: string): Promise<void> => ipcRenderer.invoke('dev:copy-text', text),
+        navigate: (url: string): Promise<void> => ipcRenderer.invoke('dev:navigate', url),
+        closeUrlEditor: (): Promise<void> => ipcRenderer.invoke('dev:close-url-editor'),
+        onSetUrl: (cb: (url: string) => void) => {
+            ipcRenderer.on('url-editor:set', (_e, url: string) => cb(url))
+        },
+    },
+
     device: {
         getNetworkInfo: (): Promise<{ mac: string; ip: string }> =>
             ipcRenderer.invoke('device:get-network-info'),
@@ -145,6 +165,18 @@ contextBridge.exposeInMainWorld('cieloo', {
 // ─── Module hooks ─────────────────────────────────────────────────────────────
 
 initAutoLoginPreload()
+
+// ─── Afficheur client : relais panier ─────────────────────────────────────────
+// Le main injecte un listener BroadcastChannel('cieloopos_cart') dans le main world
+// qui republie via window.postMessage. On le capte ici (monde isolé) et on le
+// transmet au process principal pour l'afficher sur le VFD.
+window.addEventListener('message', (event) => {
+    if (event.source !== window) return
+    const data = event.data as { __cielooVfd?: boolean; cart?: unknown } | null
+    if (data && data.__cielooVfd) {
+        ipcRenderer.send('customer-display:cart-update', data.cart)
+    }
+})
 
 // ─── Offline IPC from main process ────────────────────────────────────────────
 // Main sends 'net:offline' when it blocks a navigation (will-navigate guard).
