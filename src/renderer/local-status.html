@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Statut du serveur — Caisse locale</title>
+  <link rel="icon" href="/favicon.ico" />
+  <script type="module" src="/src/local-status.ts"></script>
+  <style>
+    :root{
+      --bg:#f4f6fb; --surface:#ffffff; --border:#e3e8f2;
+      --text:#1f2a3d; --text-2:#51607a; --muted:#8a97ad;
+      --accent:#f97316; --accent-strong:#ea580c;
+      --accent-soft:#fff4ea; --accent-border:#fbd6b0;
+      --shadow:0 10px 30px rgba(20,30,60,.07), 0 2px 6px rgba(20,30,60,.05);
+      --green:#16a34a; --red:#ef4444;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%}
+    body{
+      font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:var(--text);
+      background:
+        radial-gradient(680px 380px at 6% -10%, rgba(249,115,22,.06), transparent 64%),
+        var(--bg);
+    }
+    /* Padding sur le conteneur (et non body) : insensible au reset global du preload. */
+    .page{min-height:100vh;padding:30px 34px 34px;overflow-y:auto}
+    header{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+    header img{width:42px;height:42px;border-radius:12px;box-shadow:0 6px 16px rgba(249,115,22,.22)}
+    .title{font-size:18px;font-weight:800;letter-spacing:-.02em;line-height:1.2}
+    .title span{color:var(--accent-strong)}
+    .title .sub{display:block;font-size:12px;color:var(--muted);font-weight:500;margin-top:3px}
+    .badge{margin-left:auto;font-size:11.5px;font-weight:800;letter-spacing:.03em;padding:8px 14px;border-radius:99px;white-space:nowrap}
+    .badge.on{color:var(--green);background:#e7f7ee;border:1px solid #bce8cf}
+    .badge.off{color:var(--accent-strong);background:var(--accent-soft);border:1px solid var(--accent-border)}
+
+    .actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:22px}
+    .abtn{display:flex;align-items:center;gap:12px;cursor:pointer;text-align:left;
+      background:var(--surface);border:1.5px solid var(--border);border-radius:14px;
+      padding:14px 16px;color:var(--text);font-family:inherit;font-size:13.5px;font-weight:600;
+      box-shadow:var(--shadow);transition:border-color .15s,transform .08s}
+    .abtn:hover:not(:disabled){border-color:var(--accent-border)}
+    .abtn:active:not(:disabled){transform:scale(.99)}
+    .abtn:disabled{opacity:.45;cursor:not-allowed}
+    .abtn .ico{width:34px;height:34px;flex-shrink:0;border-radius:9px;display:flex;align-items:center;justify-content:center;
+      background:var(--accent-soft);color:var(--accent-strong)}
+    .abtn .ico svg{width:18px;height:18px}
+    .abtn .sub{display:block;font-size:11px;color:var(--muted);font-weight:500;margin-top:2px}
+
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:15px;padding:17px 18px;box-shadow:var(--shadow)}
+    .card h3{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2);
+      display:flex;align-items:center;gap:8px;margin-bottom:13px}
+    .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+    .dot.green{background:var(--green);box-shadow:0 0 0 3px rgba(22,163,74,.15)}
+    .dot.red{background:var(--red);box-shadow:0 0 0 3px rgba(239,68,68,.13)}
+    .row{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:6px 0;border-top:1px solid #f0f3f9}
+    .row:first-of-type{border-top:none}
+    .row .k{color:var(--muted)}
+    .row .v{color:var(--text);font-weight:600;text-align:right;word-break:break-all}
+    .row .v.mono{font-family:Consolas,monospace;font-size:12.5px}
+
+    .creds{background:var(--surface);border:1px solid var(--border);border-radius:15px;padding:17px 18px;margin-bottom:14px;box-shadow:var(--shadow)}
+    .creds .top{display:flex;align-items:center;margin-bottom:8px}
+    .creds h3{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2)}
+    .copybtn{margin-left:auto;border:1px solid var(--accent-border);background:var(--accent-soft);color:var(--accent-strong);
+      border-radius:9px;padding:7px 13px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer}
+    .copybtn:hover{filter:brightness(.99);background:#ffe9d4}
+
+    .pathline{display:flex;align-items:center;gap:12px;background:var(--surface);
+      border:1px solid var(--border);border-radius:13px;padding:13px 15px;font-size:12.5px;box-shadow:var(--shadow)}
+    .pathline .k{color:var(--muted);flex-shrink:0}
+    .pathline .v{color:var(--text);font-family:Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+    .pathline button{margin-left:auto;border:1px solid var(--border);background:#f4f6fb;color:var(--text-2);border-radius:8px;
+      padding:7px 13px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0}
+    .pathline button:hover{background:#eef1f8}
+
+    #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+      background:#1f2a3d;border-radius:10px;padding:10px 18px;font-size:12.5px;
+      color:#fff;transition:opacity .2s,transform .2s;pointer-events:none;box-shadow:0 8px 24px rgba(20,30,60,.25)}
+    #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  </style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <img src="/logo_CaisLa.png" alt="" />
+    <div class="title">Statut du serveur <span>Caisse locale</span>
+      <span class="sub" id="pack-sub">…</span>
+    </div>
+    <div class="badge off" id="global-badge">…</div>
+  </header>
+
+  <div class="actions">
+    <button class="abtn" id="btn-pos">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
+      <span>Ouvrir la caisse<span class="sub">dans le navigateur</span></span>
+    </button>
+    <button class="abtn" id="btn-db">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></span>
+      <span>Explorateur de base<span class="sub">parcourir / requêtes SQL</span></span>
+    </button>
+    <button class="abtn" id="btn-logs">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+      <span>Dossier des journaux<span class="sub">php.log · mariadbd.log</span></span>
+    </button>
+    <button class="abtn" id="btn-refresh">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>
+      <span>Rafraîchir<span class="sub">mettre à jour l'état</span></span>
+    </button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3><span class="dot red" id="web-dot"></span>Serveur web (PHP)</h3>
+      <div class="row"><span class="k">État</span><span class="v" id="web-state">—</span></div>
+      <div class="row"><span class="k">Port</span><span class="v mono" id="web-port">—</span></div>
+      <div class="row"><span class="k">URL</span><span class="v mono" id="web-url">—</span></div>
+    </div>
+    <div class="card">
+      <h3><span class="dot red" id="db-dot"></span>Base de données (MariaDB)</h3>
+      <div class="row"><span class="k">État</span><span class="v" id="db-state">—</span></div>
+      <div class="row"><span class="k">Port</span><span class="v mono" id="db-port">—</span></div>
+      <div class="row"><span class="k">Base</span><span class="v mono" id="db-name">—</span></div>
+    </div>
+  </div>
+
+  <div class="creds">
+    <div class="top">
+      <h3>Identifiants de la base</h3>
+      <button class="copybtn" id="btn-copy">Copier</button>
+    </div>
+    <div class="row"><span class="k">Utilisateur</span><span class="v mono" id="cred-user">—</span></div>
+    <div class="row"><span class="k">Mot de passe</span><span class="v mono" id="cred-pass">—</span></div>
+  </div>
+
+  <div class="pathline">
+    <span class="k">Données</span>
+    <span class="v" id="path-root">—</span>
+    <button id="btn-open-root">Ouvrir</button>
+  </div>
+</div>
+
+  <div id="toast"></div>
+</body>
+</html>

@@ -46,6 +46,11 @@ export interface ShortcutMap {
 /** Afficheur client VFD (pole display 2x20, ex. SAGA) piloté en série (COM). */
 export type CustomerDisplayProtocol = 'cd5220' | 'esc-pos' | 'plain'
 
+/** Mode d'affichage pendant une vente. */
+export type CustomerDisplayCartMode =
+    | 'total'     // ligne 1 = libellé, ligne 2 = total (comme avant)
+    | 'detailed'  // ligne 1 = dernier article + prix unitaire, ligne 2 = total
+
 export interface CustomerDisplaySettings {
     enabled: boolean
     /** Chemin du port série, ex. "COM3" ('' si non configuré) */
@@ -54,10 +59,34 @@ export interface CustomerDisplaySettings {
     protocol: CustomerDisplayProtocol
     /** Nombre de caractères par ligne (typiquement 20) */
     columns: number
-    /** Texte affiché par défaut (au repos) */
+    /** Message d'accueil affiché quand le panier est vide */
     line1: string
     line2: string
+    /** Mode d'affichage pendant une vente */
+    cartMode: CustomerDisplayCartMode
+    /** Libellé du total (ligne 1 en mode "total", préfixe du total en mode "detailed") */
+    totalLabel: string
+    /** En mode "detailed" : afficher le libellé devant le total (ex. "TOTAL : 12,500") */
+    showTotalLabel: boolean
+    /** Défilement du nom (mode "detailed") quand il est trop long */
+    scrollStartPauseSec: number  // pause d'immobilité au début (secondes)
+    scrollStepMs: number         // cadence du défilement (ms par pas) — plus petit = plus rapide
+    scrollInstant: boolean       // true = bascule début↔fin (instantané) au lieu d'un défilement fluide
+    /** Message de fin de vente (affiché quelques secondes après l'encaissement) */
+    thankYouEnabled: boolean
+    thankYouLine1: string
+    thankYouLine2: string
+    thankYouDurationSec: number
 }
+
+/** Valeurs par défaut des textes (source unique, réutilisée par le bouton "Remettre par défaut"). */
+export const CUSTOMER_DISPLAY_TEXT_DEFAULTS = {
+    line1: 'Bienvenue !',
+    line2: 'Ravi de vous voir',
+    totalLabel: 'TOTAL',
+    thankYouLine1: 'Merci !',
+    thankYouLine2: 'A bientot :)',
+} as const
 
 export interface AppSettings {
     autoLogin: boolean
@@ -103,8 +132,18 @@ const DEFAULTS: AppSettings = {
         baudRate: 9600,
         protocol: 'cd5220',
         columns: 20,
-        line1: 'Bienvenue',
-        line2: 'Powered by CaisLà',
+        line1: 'Bienvenue !',
+        line2: 'Ravi de vous voir',
+        cartMode: 'detailed',
+        totalLabel: 'TOTAL',
+        showTotalLabel: true,
+        scrollStartPauseSec: 0.5,
+        scrollStepMs: 450,
+        scrollInstant: false,
+        thankYouEnabled: true,
+        thankYouLine1: 'Merci !',
+        thankYouLine2: 'A bientot :)',
+        thankYouDurationSec: 5,
     },
     print: {
         enabled: true,
@@ -226,14 +265,28 @@ export function normalizeCustomerDisplay(value: Partial<CustomerDisplaySettings>
     const protocol = CUSTOMER_DISPLAY_PROTOCOLS.includes(value?.protocol as CustomerDisplayProtocol)
         ? value!.protocol as CustomerDisplayProtocol
         : 'cd5220'
+    const str = (v: unknown, fallback: string): string =>
+        typeof v === 'string' ? v.slice(0, 40) : fallback
+    const cartMode: CustomerDisplayCartMode = value?.cartMode === 'total' ? 'total' : 'detailed'
+    const D = CUSTOMER_DISPLAY_TEXT_DEFAULTS
     return {
         enabled: value?.enabled === true,
         port: typeof value?.port === 'string' ? value.port.trim().slice(0, 64) : '',
         baudRate: clampInt(value?.baudRate, 300, 921600, 9600),
         protocol,
         columns: clampInt(value?.columns, 8, 40, 20),
-        line1: typeof value?.line1 === 'string' ? value.line1.slice(0, 40) : '',
-        line2: typeof value?.line2 === 'string' ? value.line2.slice(0, 40) : '',
+        line1: str(value?.line1, D.line1),
+        line2: str(value?.line2, D.line2),
+        cartMode,
+        totalLabel: str(value?.totalLabel, D.totalLabel),
+        showTotalLabel: value?.showTotalLabel !== false,
+        scrollStartPauseSec: clampNum(value?.scrollStartPauseSec, 0, 10, 0.5),
+        scrollStepMs: clampInt(value?.scrollStepMs, 50, 2000, 450),
+        scrollInstant: value?.scrollInstant === true,
+        thankYouEnabled: value?.thankYouEnabled !== false,
+        thankYouLine1: str(value?.thankYouLine1, D.thankYouLine1),
+        thankYouLine2: str(value?.thankYouLine2, D.thankYouLine2),
+        thankYouDurationSec: clampInt(value?.thankYouDurationSec, 1, 60, 5),
     }
 }
 

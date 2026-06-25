@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Caisse locale — Configuration</title>
+  <link rel="icon" href="/favicon.ico" />
+  <script type="module" src="/src/local-config.ts"></script>
+  <style>
+    /* compléments propres à cette fenêtre (au-dessus de settings.css) */
+    #saved { font-size: .8rem; color: var(--success); font-weight: 600; opacity: 0; transition: opacity .2s; }
+    #saved.show { opacity: 1; }
+    .mono { font-family: ui-monospace, SFMono-Regular, monospace; font-size: .82rem; }
+    .pill { display:inline-flex; align-items:center; gap:6px; font-size:.78rem; font-weight:700; padding:3px 9px; border-radius:999px; }
+    .pill .dot { width:7px; height:7px; border-radius:50%; }
+    .pill.ok { background:#eaf6ee; color:var(--success); }
+    .pill.ok .dot { background:var(--success); }
+    .pill.warn { background:#fdf1f2; color:var(--danger); }
+    .pill.warn .dot { background:var(--danger); }
+  </style>
+</head>
+<body>
+<div class="settings-shell">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+  <nav class="settings-sidebar">
+    <div class="sidebar-brand">
+      <img class="sidebar-brand-logo" src="/logo_CaisLa.png" alt="CaisLà" />
+      <span class="sidebar-brand-name">Caisse locale</span>
+    </div>
+
+    <p class="sidebar-label">Configuration</p>
+    <button class="sidebar-item active" data-tab="loader">
+      <svg class="sidebar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Écran de chargement
+    </button>
+    <button class="sidebar-item" data-tab="pack">
+      <svg class="sidebar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+      Pack &amp; serveur
+    </button>
+  </nav>
+
+  <!-- ── Content ──────────────────────────────────────────────────────────── -->
+  <main class="settings-content">
+
+    <!-- ── Tab: Écran de chargement ───────────────────────────────────────── -->
+    <div id="tab-loader" class="settings-tab active">
+      <h2 class="tab-title">Écran de chargement</h2>
+
+      <div class="section">
+        <p class="section-title">Apparence pendant l'installation et le démarrage</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Mode d'affichage</span>
+            <span class="setting-desc">Ce qui s'affiche sur l'écran de chargement de la caisse locale.</span>
+          </div>
+          <select class="setting-select" id="loader-mode">
+            <option value="prod">Production</option>
+            <option value="dev">Développeur</option>
+            <option value="debug">Débogage</option>
+          </select>
+        </div>
+
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info">
+            <span class="setting-label" id="mode-name">…</span>
+            <span class="setting-desc" id="mode-desc">…</span>
+          </div>
+          <span id="saved">✓ Enregistré</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Pack & serveur ────────────────────────────────────────────── -->
+    <div id="tab-pack" class="settings-tab">
+      <h2 class="tab-title">Pack &amp; serveur</h2>
+
+      <div class="section">
+        <p class="section-title">Pack local</p>
+        <div class="setting-row">
+          <div class="setting-info"><span class="setting-label">État</span></div>
+          <span id="pack-state" class="pill warn"><span class="dot"></span>…</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><span class="setting-label">Version installée</span></div>
+          <span class="setting-value mono" id="pack-version">—</span>
+        </div>
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info"><span class="setting-label">Dossier des données</span></div>
+          <div class="setting-control-row">
+            <input class="setting-input setting-input--readonly" id="pack-path" readonly />
+            <button class="btn btn-default" id="btn-open-path">Ouvrir</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Source du pack</p>
+        <div class="setting-row">
+          <div class="setting-info"><span class="setting-label">Origine</span>
+            <span class="setting-desc" id="pack-origin-desc">—</span></div>
+          <span class="setting-value mono" id="pack-origin">—</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><span class="setting-label">Dernier pack disponible (cloud)</span></div>
+          <span class="setting-value mono" id="pack-cloud">—</span>
+        </div>
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info"><span class="setting-label">URL de téléchargement</span></div>
+          <div class="setting-control-row">
+            <input class="setting-input setting-input--readonly" id="pack-url" readonly />
+            <button class="btn btn-default" id="btn-copy-url">Copier</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Serveur local</p>
+        <div class="setting-row">
+          <div class="setting-info"><span class="setting-label">URL de base</span></div>
+          <span class="setting-value mono" id="srv-base">—</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><span class="setting-label">Explorateur de base de données</span>
+            <span class="setting-desc">Parcourir les tables / lancer du SQL dans le navigateur.</span></div>
+          <div class="setting-actions">
+            <button class="btn btn-default" id="btn-open-db">Ouvrir</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><span class="setting-label">Rafraîchir les informations</span></div>
+          <div class="setting-actions">
+            <button class="btn btn-default" id="btn-refresh">Rafraîchir</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+</body>
+</html>

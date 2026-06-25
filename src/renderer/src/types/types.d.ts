@@ -3,6 +3,7 @@ export { }
 
 import type { AppSettings, ShortcutMap, PrintSettings, PrinterConfig, CustomerDisplaySettings } from '../../../modules/settings/main'
 import type { PrintServerStatus } from '../../../modules/print-server/main'
+import type { LocalDebugInfo } from '../../../modules/local-dolibarr/main'
 
 export type MultiprintSection = {
     rowid: number
@@ -13,6 +14,20 @@ export type MultiprintSection = {
 }
 
 declare global {
+    type LocalDebugInfoUI = LocalDebugInfo & { dbAdminUrl: string | null }
+    type LocalPackInfoUI = {
+        present: boolean
+        version: string | null
+        paths: LocalDebugInfo['paths']
+        baseUrl: string | null
+        dbAdminUrl: string | null
+        configuredUrl: string | null
+        usingDashboard: boolean
+        effectiveUrl: string | null
+        cloud: { version: string; size: number } | null
+        cloudError: string | null
+    }
+
     interface Window {
         cieloo: {
             config: {
@@ -72,6 +87,10 @@ declare global {
                 reloadLast: () => Promise<void>
                 check: () => Promise<boolean>
             }
+            errorPage: {
+                retry: () => Promise<void>
+                copy: (text: string) => Promise<void>
+            }
             app: {
                 version: () => Promise<string>
                 isDev: () => Promise<boolean>
@@ -87,6 +106,17 @@ declare global {
             }
             multiprint: {
                 getSections: () => Promise<{ sections: MultiprintSection[] | null; error?: string }>
+            }
+            local: {
+                getLoaderMode: () => Promise<'prod' | 'dev' | 'debug'>
+                setLoaderMode: (mode: 'prod' | 'dev' | 'debug') => Promise<'prod' | 'dev' | 'debug'>
+                getDebugInfo: () => Promise<LocalDebugInfoUI>
+                getPackInfo: () => Promise<LocalPackInfoUI>
+                openExternal: (url: string) => Promise<void>
+                openPath: (target: string) => Promise<void>
+                copy: (text: string) => Promise<void>
+                openDbAdmin: () => Promise<string | null>
+                onRefresh: (cb: () => void) => void
             }
         }
     }

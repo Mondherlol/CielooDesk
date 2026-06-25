@@ -134,59 +134,197 @@ export async function sendToCustomerDisplay(
     }
 }
 
-/** Affiche le texte par défaut configuré (au démarrage). Sans effet si désactivé. */
-export async function pushIdleText(): Promise<void> {
-    const config = loadSettings().customerDisplay
-    if (!config.enabled || !config.port) return
-    await sendToCustomerDisplay(config.line1, config.line2)
-}
-
 // ─── Affichage temps réel du panier ─────────────────────────────────────────────
 // L'app POS (index.php) diffuse l'état du panier via BroadcastChannel('cieloopos_cart')
 // à chaque ajout/retrait. On capte ce flux côté Electron (cf. preload + injection)
-// et on affiche le total ici, sans rien modifier côté PHP / second screen.
+// et on gère un petit "scénario" d'affichage : accueil → vente → merci → accueil.
+// Sans rien modifier côté PHP / second screen.
+
+interface CartLine {
+    label?: string
+    unit_ttc_formatted?: string
+    unit_ttc?: number
+}
 
 interface CartState {
-    lines?: unknown[]
+    lines?: CartLine[]
     total_ttc?: number
     total_ttc_formatted?: string
 }
 
 let lastSentSignature = ''
 let sendDebounce: NodeJS.Timeout | null = null
+let thankYouTimer: NodeJS.Timeout | null = null
+let lastHadItems = false
 
-/** Centre / ajuste un libellé sur la largeur de l'afficheur. */
+// État courant de l'affichage panier (pour le défilement)
+let scrollTimer: NodeJS.Timeout | null = null
+let scrollFrames: number[] = [0] // suite d'offsets (avec pauses) à parcourir en boucle
+let scrollIdx = 0
+let cartView: { name: string; price: string; total: string; columns: number } | null = null
+
+/** Centre un libellé sur la largeur de l'afficheur. */
 function center(text: string, columns: number): string {
     const t = text.slice(0, columns)
-    const pad = Math.max(0, columns - t.length)
-    const left = Math.floor(pad / 2)
+    const left = Math.floor(Math.max(0, columns - t.length) / 2)
     return ' '.repeat(left) + t
 }
 
-/** Construit les 2 lignes à afficher pour un panier (ou le message au repos). */
-function formatCart(cart: CartState, columns: number, idle1: string, idle2: string): [string, string] {
-    const hasItems = Array.isArray(cart.lines) && cart.lines.length > 0
-    if (!hasItems) return [idle1, idle2]
-
-    const amount = (cart.total_ttc_formatted ?? '').trim() || String(cart.total_ttc ?? 0)
-    // Ligne 1 : libellé "TOTAL" centré ; Ligne 2 : montant centré.
-    return [center('TOTAL', columns), center(amount, columns)]
+/** Envoie 2 lignes au VFD, avec debounce + dé-duplication. */
+function displayLines(l1: string, l2: string, force = false): void {
+    const signature = `${l1}\n${l2}`
+    if (!force && signature === lastSentSignature) return
+    lastSentSignature = signature
+    if (sendDebounce) clearTimeout(sendDebounce)
+    sendDebounce = setTimeout(() => { void sendToCustomerDisplay(l1, l2) }, 80)
 }
 
-/** Reçoit un état de panier (depuis le renderer) et l'affiche sur le VFD (debouncé). */
+function stopScroll(): void {
+    if (scrollTimer) { clearInterval(scrollTimer); scrollTimer = null }
+    cartView = null
+}
+
+/** Largeur disponible pour le nom (le prix unitaire reste fixe à droite). */
+function nameWidth(price: string, columns: number): number {
+    return Math.max(1, columns - price.slice(0, columns).length - 1) // -1 = espace séparateur
+}
+
+/**
+ * Construit la suite d'offsets de défilement selon la config :
+ * pause au début, défilement (ou bascule directe si "instantané") jusqu'à
+ * révéler la fin du nom, pause à la fin, puis retour au début.
+ */
+function buildScrollFrames(name: string, price: string, columns: number): number[] {
+    const width = nameWidth(price, columns)
+    if (name.length <= width) return [0]
+
+    const c = loadSettings().customerDisplay
+    const maxScroll = name.length - width
+    // Nombre de "ticks" d'immobilité correspondant à la pause configurée.
+    const hold = Math.max(0, Math.round((c.scrollStartPauseSec * 1000) / Math.max(1, c.scrollStepMs)))
+    const frames: number[] = []
+
+    if (c.scrollInstant) {
+        // Bascule directe début ↔ fin (pas de défilement fluide).
+        const h = Math.max(1, hold)
+        for (let i = 0; i < h; i++) frames.push(0)
+        for (let i = 0; i < h; i++) frames.push(maxScroll)
+        return frames
+    }
+
+    for (let i = 0; i < hold; i++) frames.push(0)
+    for (let p = 1; p <= maxScroll; p++) frames.push(p)
+    for (let i = 0; i < hold; i++) frames.push(maxScroll)
+    return frames.length > 0 ? frames : [0]
+}
+
+/** Ligne haute : nom (fenêtre à partir de l'offset) + prix unitaire fixe à droite. */
+function buildItemLine(name: string, price: string, columns: number, offset: number): string {
+    const priceStr = price.slice(0, columns)
+    const width = nameWidth(price, columns)
+    const namePart = name.slice(offset, offset + width).padEnd(width)
+    const line = `${namePart} ${priceStr}`
+    return line.length > columns ? line.slice(0, columns) : line.padEnd(columns)
+}
+
+/** Ligne basse : total, éventuellement préfixé du libellé ("TOTAL : 12,500"). */
+function buildTotalLine(total: string, columns: number): string {
+    const c = loadSettings().customerDisplay
+    if (c.showTotalLabel && c.totalLabel.trim()) {
+        return center(`${c.totalLabel.trim()} : ${total}`, columns)
+    }
+    return center(total, columns)
+}
+
+/** Rend une trame de l'affichage panier (appelée une fois, ou en boucle si défilement). */
+function renderCartFrame(): void {
+    if (!cartView) return
+    const offset = scrollFrames[scrollIdx] ?? 0
+    const top = buildItemLine(cartView.name, cartView.price, cartView.columns, offset)
+    const bottom = buildTotalLine(cartView.total, cartView.columns)
+    displayLines(top, bottom)
+}
+
+/** Démarre l'affichage du panier (dernier article + prix en haut, total en bas). */
+function showCart(name: string, price: string, total: string, columns: number): void {
+    stopScroll()
+    cartView = { name, price, total, columns }
+    scrollFrames = buildScrollFrames(name, price, columns)
+    scrollIdx = 0
+    renderCartFrame()
+
+    if (scrollFrames.length > 1) {
+        const stepMs = loadSettings().customerDisplay.scrollStepMs
+        scrollTimer = setInterval(() => {
+            scrollIdx = (scrollIdx + 1) % scrollFrames.length
+            renderCartFrame()
+        }, stepMs)
+    }
+}
+
+/** Affiche le message d'accueil (panier vide). */
+function showWelcome(): void {
+    stopScroll()
+    const c = loadSettings().customerDisplay
+    displayLines(center(c.line1, c.columns), center(c.line2, c.columns))
+}
+
+/** Affiche le texte d'accueil au démarrage. Sans effet si désactivé. */
+export async function pushIdleText(): Promise<void> {
+    const c = loadSettings().customerDisplay
+    if (!c.enabled || !c.port) return
+    await sendToCustomerDisplay(center(c.line1, c.columns), center(c.line2, c.columns))
+}
+
+/** Reçoit un état de panier (depuis le renderer) et joue le scénario d'affichage. */
 export function handleCartUpdate(cart: CartState): void {
-    const config = loadSettings().customerDisplay
-    if (!config.enabled || !config.port) return
+    const c = loadSettings().customerDisplay
+    if (!c.enabled || !c.port) return
 
-    const [l1, l2] = formatCart(cart, config.columns, config.line1, config.line2)
-    const signature = `${l1}\n${l2}`
-    if (signature === lastSentSignature) return // rien de neuf, on évite de spammer le port
-    lastSentSignature = signature
+    const lines = Array.isArray(cart.lines) ? cart.lines : []
+    const hasItems = lines.length > 0
 
-    if (sendDebounce) clearTimeout(sendDebounce)
-    sendDebounce = setTimeout(() => {
-        void sendToCustomerDisplay(l1, l2)
-    }, 120)
+    if (hasItems) {
+        // Vente en cours → on annule un éventuel "merci".
+        if (thankYouTimer) { clearTimeout(thankYouTimer); thankYouTimer = null }
+        lastHadItems = true
+
+        const total = (cart.total_ttc_formatted ?? '').trim() || String(cart.total_ttc ?? 0)
+
+        if (c.cartMode === 'total') {
+            // Mode "total seul" : ligne 1 = libellé, ligne 2 = total (comme avant).
+            stopScroll()
+            displayLines(center(c.totalLabel, c.columns), center(total, c.columns))
+            return
+        }
+
+        // Mode "detailed" : ligne 1 = dernier article + prix unitaire, ligne 2 = total.
+        // lines[0] = dernier article scanné/ajouté (réordonné côté ajax_secondscreen.php)
+        const last = lines[0] ?? {}
+        const name = (last.label ?? '').trim()
+        const unit = (last.unit_ttc_formatted ?? '').trim() || String(last.unit_ttc ?? '')
+        showCart(name, unit, total, c.columns)
+        return
+    }
+
+    // Panier vide : on arrête le défilement éventuel.
+    stopScroll()
+
+    // Si on sort d'une vente → message de fin éphémère, puis accueil.
+    if (lastHadItems && c.thankYouEnabled) {
+        lastHadItems = false
+        displayLines(center(c.thankYouLine1, c.columns), center(c.thankYouLine2, c.columns), true)
+        if (thankYouTimer) clearTimeout(thankYouTimer)
+        thankYouTimer = setTimeout(() => {
+            thankYouTimer = null
+            showWelcome()
+        }, Math.max(1, c.thankYouDurationSec) * 1000)
+        return
+    }
+
+    lastHadItems = false
+    // Ne pas écraser un "merci" en cours d'affichage.
+    if (!thankYouTimer) showWelcome()
 }
 
 export function registerCustomerDisplayIpc(): void {

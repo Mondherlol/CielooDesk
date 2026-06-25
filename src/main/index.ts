@@ -24,6 +24,19 @@ import {
 import { startSecondScreen, syncSecondScreen } from '../modules/second-screen/main'
 import { initAutoUpdater, registerUpdaterIpc } from '../modules/updater/main'
 import { registerCustomerDisplayIpc, pushIdleText } from '../modules/customer-display/main'
+import {
+    ensurePack as ensureLocalPack,
+    startLocal as startLocalDolibarr,
+    stopLocal as stopLocalDolibarr,
+    uninstallLocal as uninstallLocalDolibarr,
+    resetLocalConfig as resetLocalConfigDolibarr,
+    isPackPresent as isLocalPackPresent,
+    getLocalStatus,
+    getLocalDebugInfo,
+    getDbAdminUrl,
+    getSyncState,
+} from '../modules/local-dolibarr/main'
+import { runCloudSync, fetchLatestPack, type SyncDeps } from '../modules/cloud-sync/main'
 
 const isDev = !app.isPackaged
 
@@ -297,7 +310,20 @@ async function reportRustDeskHeartbeat(): Promise<void> {
 
 // ─── Instance config ──────────────────────────────────────────────────────────
 
-interface Config { instance?: string; freeInstance?: boolean }
+// Mode de l'ecran de chargement de la caisse locale :
+//  - 'prod'  : textes rigolos + barre (par defaut, pour les caissiers)
+//  - 'dev'   : textes techniques reels + barre + journal des actions
+//  - 'debug' : console temps reel des actions, sans barre ni overlay « joli »
+type LoaderMode = 'prod' | 'dev' | 'debug'
+
+interface Config {
+    instance?: string
+    freeInstance?: boolean
+    localOffered?: boolean        // on a deja propose le mode local au 1er lancement
+    localEnabled?: boolean        // l'utilisateur a accepte / le pack est installe
+    localActive?: boolean         // on tourne actuellement sur la caisse locale
+    localLoaderMode?: LoaderMode  // apparence de l'ecran de chargement local
+}
 
 type InstanceSource = 'clipboard' | 'exe'
 
@@ -317,6 +343,15 @@ function readConfig(): Config {
 
 function writeConfig(c: Config): void {
     fs.writeFileSync(configPath(), JSON.stringify(c, null, 2))
+}
+
+function getLoaderMode(): LoaderMode {
+    const m = readConfig().localLoaderMode
+    return m === 'dev' || m === 'debug' ? m : 'prod'
+}
+
+function setLoaderMode(mode: LoaderMode): void {
+    writeConfig({ ...readConfig(), localLoaderMode: mode })
 }
 
 function normalizeInstance(value: string): string | null {
@@ -423,6 +458,37 @@ function loadOfflinePage(): void {
         void mainWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/offline.html`)
     } else {
         void mainWindow.loadFile(path.join(__dirname, '../renderer/offline.html'))
+    }
+}
+
+// Codes d'erreur reseau = perte de connectivite reelle → page « hors-ligne ».
+// (Le reste des erreurs reseau = serveur injoignable/erreur → page d'erreur.)
+const OFFLINE_CODES = new Set([-21, -105, -106, -109, -137])
+
+function netErrorMessage(code: number): string {
+    switch (code) {
+        case -100: return 'La connexion au serveur a été interrompue.'
+        case -101: return 'La connexion au serveur a été réinitialisée.'
+        case -102: return 'Le serveur a refusé la connexion.'
+        case -118: return 'Le serveur n\'a pas répondu à temps (délai dépassé).'
+        default: return 'Impossible de charger la page (erreur réseau).'
+    }
+}
+
+// Page d'erreur generique : titre + message + cause + code, dans la fenetre.
+function showErrorPage(opts: { title?: string; message: string; detail?: string; code?: string | number }): void {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const qs = new URLSearchParams()
+    if (opts.title) qs.set('title', opts.title)
+    qs.set('message', opts.message)
+    if (opts.detail) qs.set('detail', String(opts.detail).slice(0, 1500))
+    if (opts.code !== undefined && opts.code !== null && String(opts.code) !== '') qs.set('code', String(opts.code))
+    const search = `?${qs.toString()}`
+    if (!mainWindow.isVisible()) mainWindow.show()
+    if (isDev && process.env.ELECTRON_RENDERER_URL) {
+        void mainWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/error.html${search}`)
+    } else {
+        void mainWindow.loadFile(path.join(__dirname, '../renderer/error.html'), { search })
     }
 }
 let printSettingsWindow: BrowserWindow | null = null
@@ -751,6 +817,25 @@ function resolveAppIcon(): string {
     return path.join(app.getAppPath(), 'assets', 'img', 'favicon.ico')
 }
 
+// Logo CaisLà inline (base64) pour les ecrans de chargement servis en data: URL
+// (pas d'acces fichier depuis ces pages). Lu une seule fois puis mis en cache.
+let cachedLogoDataUri: string | null = null
+function logoDataUri(): string {
+    if (cachedLogoDataUri !== null) return cachedLogoDataUri
+    try {
+        const base = app.isPackaged ? process.resourcesPath : app.getAppPath()
+        const file = path.join(base, 'assets', 'img', 'logo_CaisLa.png')
+        cachedLogoDataUri = `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`
+    } catch {
+        cachedLogoDataUri = ''
+    }
+    return cachedLogoDataUri
+}
+
+function escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 // ─── AnyDesk ─────────────────────────────────────────────────────────────────
 
 function resolveAnyDeskPath(): string {
@@ -893,6 +978,33 @@ function buildMenu(): void {
         }
     ]
 
+    // ── Onglet « Caisse Locale » : contenu dynamique selon l'etat d'installation ──
+    const localInstalled = isLocalPackPresent()
+    const localActive = readConfig().localActive
+    const caisseLocaleSubmenu: Electron.MenuItemConstructorOptions[] = localInstalled
+        ? [
+            localActive
+                ? { label: 'Revenir au mode en ligne', click: () => void switchToCloud() }
+                : { label: 'Basculer en caisse locale', click: () => void switchToLocal() },
+            { label: 'Synchroniser', click: () => void syncLocalNow() },
+            { label: 'Statut du serveur local…', click: () => void showLocalServerStatus() },
+            { label: 'Config…', click: () => openLocalConfigWindow() },
+            { type: 'separator' },
+            {
+                label: 'Effacer config',
+                click: () => void resetLocalConfig()
+            },
+            {
+                label: 'Désinstaller la caisse locale',
+                enabled: !localActive,            // on ne desinstalle pas pendant qu'on l'utilise
+                click: () => void uninstallLocal()
+            }
+        ]
+        : [
+            { label: 'Installer la caisse locale…', click: () => void switchToLocal() },
+            { label: 'Config…', click: () => openLocalConfigWindow() }
+        ]
+
     const devSubmenu: Electron.MenuItemConstructorOptions[] = [
         {
             label: 'Effacer config',
@@ -968,6 +1080,7 @@ function buildMenu(): void {
         { label: 'Navigation', submenu: navigationSubmenu },
         { label: 'Affichage', submenu: affichageSubmenu },
         { label: 'Paramètres', submenu: paramsSubmenu },
+        { label: 'Caisse Locale', submenu: caisseLocaleSubmenu },
         { label: 'Support', submenu: supportSubmenu }
     ]
 
@@ -1116,6 +1229,8 @@ function openSecondDisplaySettingsWindow(): void {
 
 let contactWindow: BrowserWindow | null = null
 let techConfigWindow: BrowserWindow | null = null
+let localConfigWindow: BrowserWindow | null = null
+let localStatusWindow: BrowserWindow | null = null
 
 // Ouvre un chemin de l'app Cieloo (relatif à la base) dans une nouvelle webview.
 function openCielooPathInNewWindow(pathname: string, title: string): void {
@@ -1132,11 +1247,16 @@ function openCielooPathInNewWindow(pathname: string, title: string): void {
 
     const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
 
+    // Ne jamais depasser la zone utile de l'ecran (barre des taches comprise).
+    const workArea = screen.getPrimaryDisplay().workAreaSize
+    const width = Math.min(1280, workArea.width)
+    const height = Math.min(820, workArea.height)
+
     const win = new BrowserWindow({
-        width: 1280,
-        height: 820,
-        minWidth: 900,
-        minHeight: 600,
+        width,
+        height,
+        minWidth: Math.min(900, workArea.width),
+        minHeight: Math.min(600, workArea.height),
         icon: resolveAppIcon(),
         title: `${title} - CielooPos`,
         backgroundColor: '#ffffff',
@@ -1152,9 +1272,13 @@ function openCielooPathInNewWindow(pathname: string, title: string): void {
         },
     })
 
+    win.setMenu(null) // pas de barre de menus en haut
     win.webContents.setWindowOpenHandler(({ url }) => handleWindowOpen(url))
     lockNavigation(win.webContents)
-    win.once('ready-to-show', () => win.show())
+    win.once('ready-to-show', () => {
+        win.center()
+        win.show()
+    })
     void win.loadURL(`${base}${pathname}`)
 }
 
@@ -1175,6 +1299,7 @@ function openUrlEditorWindow(): void {
     urlEditorWindow = new BrowserWindow({
         width: 560,
         height: 200,
+        useContentSize: true, // width/height = zone de contenu (hors barre de titre)
         resizable: false,
         minimizable: false,
         maximizable: false,
@@ -1193,7 +1318,18 @@ function openUrlEditorWindow(): void {
     })
 
     urlEditorWindow.setMenu(null)
-    urlEditorWindow.once('ready-to-show', () => urlEditorWindow?.show())
+    urlEditorWindow.once('ready-to-show', () => {
+        // Ajuste la hauteur de la fenetre pile sur le contenu (pas de scroll).
+        urlEditorWindow?.webContents
+            .executeJavaScript('Math.ceil(document.body.getBoundingClientRect().height)')
+            .then((h: number) => {
+                if (urlEditorWindow && !urlEditorWindow.isDestroyed() && h > 0) {
+                    urlEditorWindow.setContentSize(560, h)
+                }
+            })
+            .catch(() => { /* garde la taille par defaut */ })
+        urlEditorWindow?.show()
+    })
     urlEditorWindow.on('closed', () => { urlEditorWindow = null })
 
     const query = `?url=${encodeURIComponent(currentUrl)}`
@@ -1275,6 +1411,44 @@ function openTechConfigWindow(): void {
     }
 }
 
+// Fenetre « Config » de la caisse locale (pour l'instant : mode de l'ecran de chargement).
+function openLocalConfigWindow(): void {
+    if (localConfigWindow && !localConfigWindow.isDestroyed()) {
+        localConfigWindow.focus()
+        return
+    }
+
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+    localConfigWindow = new BrowserWindow({
+        width: 820,
+        height: 600,
+        useContentSize: true,
+        icon: resolveAppIcon(),
+        title: 'Caisse locale — Configuration',
+        backgroundColor: '#ffffff',
+        show: false,
+        resizable: false,
+        parent: parentWindow,
+        webPreferences: {
+            preload: path.join(__dirname, '../preload/index.js'),
+            contextIsolation: true,
+            sandbox: false,
+            nodeIntegration: false,
+        }
+    })
+
+    localConfigWindow.setMenu(null)
+    localConfigWindow.once('ready-to-show', () => localConfigWindow?.show())
+    localConfigWindow.on('closed', () => { localConfigWindow = null })
+
+    if (isDev && process.env.ELECTRON_RENDERER_URL) {
+        void localConfigWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/local-config.html`)
+    } else {
+        void localConfigWindow.loadFile(path.join(__dirname, '../renderer/local-config.html'))
+    }
+}
+
 // ─── URL helpers ──────────────────────────────────────────────────────────────
 
 function isCielooUrl(url: string): boolean {
@@ -1288,7 +1462,10 @@ function isFreeInstanceUrl(url: string): boolean {
 }
 
 function isLocalUrl(url: string): boolean {
-    return url.startsWith('file://') || url.startsWith('http://localhost:')
+    return url.startsWith('file://')
+        || url.startsWith('http://localhost:')
+        || url.startsWith('http://127.0.0.1:')
+        || url.startsWith('http://[::1]:')
 }
 
 function isExternalContactLink(url: string): boolean {
@@ -1297,8 +1474,14 @@ function isExternalContactLink(url: string): boolean {
 
 // Enforce navigation lock on any webContents (main + popups)
 function lockNavigation(wc: Electron.WebContents): void {
+    // En mode caisse locale, tout le POS (et le wizard d'install Dolibarr) vit sur
+    // http://127.0.0.1:<port>. La navigation locale doit donc être autorisée dès que
+    // le mode local est actif — pas seulement en dev — sinon chaque « Étape suivante »
+    // de l'install est bloquée et l'utilisateur reste coincé sur /install/index.php.
+    const allowLocalNav = (url: string): boolean =>
+        isLocalUrl(url) && (isDev || readConfig().localActive === true)
     wc.on('will-navigate', (event, url) => {
-        if (isDev && isLocalUrl(url)) return
+        if (allowLocalNav(url)) return
         if (isExternalContactLink(url)) {
             event.preventDefault()
             void shell.openExternal(url)
@@ -1308,7 +1491,7 @@ function lockNavigation(wc: Electron.WebContents): void {
         event.preventDefault()
     })
     wc.on('will-redirect', (event, url) => {
-        if (isDev && isLocalUrl(url)) return
+        if (allowLocalNav(url)) return
         if (isCielooUrl(url) || isFreeInstanceUrl(url)) return
         event.preventDefault()
     })
@@ -1352,9 +1535,730 @@ function handleWindowOpen(url: string): Electron.WindowOpenHandlerResponse {
     }
 }
 
+// ─── Mode caisse LOCAL ─────────────────────────────────────────────────────
+
+// Ecran de chargement « sexy » partage (caisse locale + retour en ligne).
+// `mode`  : 'local' → barre de progression determinee ; 'cloud' → barre indeterminee.
+// `steps` : affiche le compteur d'etapes 1..5 — UNIQUEMENT pendant l'installation
+//           (1er lancement). Pour un simple demarrage (caisse deja installee), on
+//           ne montre que la barre, les « etapes » n'auraient aucun sens.
+function progressHtml(opts: { title: string; subtitle?: string; message: string; mode: 'local' | 'cloud'; steps?: boolean; badge?: string; log?: boolean }): string {
+    const logo = logoDataUri()
+    const isCloud = opts.mode === 'cloud'
+    const showSteps = opts.steps === true
+    const segs = showSteps
+        ? Array.from({ length: 5 }, (_, i) => `<span class="seg" data-i="${i + 1}"></span>`).join('')
+        : ''
+    return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      html,body{height:100%}
+      body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#fff;overflow:hidden;
+        background:
+          radial-gradient(900px 520px at 12% -12%, rgba(255,159,67,.22), transparent 68%),
+          radial-gradient(760px 520px at 105% 118%, rgba(255,107,0,.16), transparent 70%),
+          linear-gradient(160deg,#1d2747 0%,#121b35 58%,#0b1226 100%);
+        display:flex;align-items:center;justify-content:center}
+      .card{width:min(460px,86vw);text-align:center;padding:10px;animation:rise .45s cubic-bezier(.22,1,.36,1) both}
+      .logo{width:88px;height:88px;border-radius:24px;object-fit:cover;
+        box-shadow:0 16px 44px rgba(255,127,23,.38);
+        animation:pop .55s cubic-bezier(.22,1,.36,1) both, float 3.6s ease-in-out .6s infinite}
+      h1{margin:20px 0 4px;font-size:21px;font-weight:800;letter-spacing:-.02em}
+      .accent{color:#ff8a1f}
+      .sub{font-size:12.5px;color:#8ea0bd;letter-spacing:.02em;margin-bottom:14px;min-height:15px}
+      #msg{font-size:15px;line-height:1.5;color:#d7e0f0;min-height:46px;padding:0 6px;
+        display:flex;align-items:center;justify-content:center;transition:opacity .25s;will-change:opacity}
+      .bar{height:11px;border-radius:99px;background:rgba(255,255,255,.10);overflow:hidden;position:relative;
+        box-shadow:inset 0 1px 3px rgba(0,0,0,.35)}
+      #fill{height:100%;width:0%;border-radius:99px;position:relative;overflow:hidden;
+        background:linear-gradient(90deg,#ff7a00,#ffb24d);
+        box-shadow:0 0 16px rgba(255,138,31,.65);transition:width .5s cubic-bezier(.4,0,.2,1)}
+      #fill::after{content:'';position:absolute;inset:0;border-radius:99px;
+        background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);
+        transform:translateX(-100%);animation:shine 1.7s ease-in-out infinite}
+      .bar.indet #fill{width:36%;animation:indet 1.25s ease-in-out infinite}
+      .bar.indet #fill::after{display:none}
+      .steps{display:flex;gap:8px;justify-content:center;margin-top:18px}
+      .seg{height:6px;width:30px;border-radius:99px;background:rgba(255,255,255,.16);transition:.4s}
+      .seg.on{background:linear-gradient(90deg,#ff7a00,#ffb24d);box-shadow:0 0 12px rgba(255,138,31,.55)}
+      #stepLabel{margin-top:13px;font-size:12px;letter-spacing:.06em;color:#7e90ad;min-height:15px}
+      #stepLabel b{color:#ff8a1f;font-weight:700;font-size:13px}
+      .badge{position:fixed;top:16px;right:16px;font-size:10.5px;font-weight:800;letter-spacing:.1em;
+        padding:5px 10px;border-radius:99px;color:#ffb24d;background:rgba(255,138,31,.12);
+        border:1px solid rgba(255,138,31,.4)}
+      #devlog{margin-top:18px;max-height:148px;overflow-y:auto;text-align:left;
+        font-family:'Cascadia Code',Consolas,monospace;font-size:11px;line-height:1.55;
+        color:#9fb0cc;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.07);
+        border-radius:10px;padding:10px 12px}
+      #devlog .ln{white-space:pre-wrap;word-break:break-word}
+      #devlog .ph{color:#ff8a1f}
+      #devlog::-webkit-scrollbar{width:7px}
+      #devlog::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:99px}
+      @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+      @keyframes pop{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:scale(1)}}
+      @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+      @keyframes shine{0%{transform:translateX(-100%)}60%,100%{transform:translateX(100%)}}
+      @keyframes indet{0%{margin-left:-36%}100%{margin-left:100%}}
+    </style></head><body>
+      ${opts.badge ? `<div class="badge">${escapeHtml(opts.badge)}</div>` : ''}
+      <div class="card">
+        ${logo ? `<img class="logo" src="${logo}" alt="CaisLà">` : ''}
+        <h1>${opts.title}</h1>
+        <div class="sub">${opts.subtitle ? escapeHtml(opts.subtitle) : ''}</div>
+        <div id="msg">${escapeHtml(opts.message)}</div>
+        <div class="bar ${isCloud ? 'indet' : ''}"><div id="fill"></div></div>
+        ${showSteps ? `<div class="steps">${segs}</div><div id="stepLabel"></div>` : ''}
+        ${opts.log ? `<div id="devlog"></div>` : ''}
+      </div>
+    </body></html>`
+}
+
+// Etape « humaine » (1 a 5) deduite de la phase technique. Les phases de
+// telechargement/extraction (1er install) restent en « preparation » (0).
+function phaseToStep(phase?: string): number {
+    switch (phase) {
+        case 'db': return 1
+        case 'web': return 2
+        case 'install-config': return 3
+        case 'install-db': return 4
+        case 'install-admin':
+        case 'ready': return 5
+        default: return 0
+    }
+}
+
+// Textes « rigolos » du mode prod, par phase. Le module local emet des messages
+// techniques (verite affichee telle quelle en dev/debug) ; ici on les habille.
+const FUNNY_BY_PHASE: Record<string, string> = {
+    'intro-install': 'On prépare votre caisse…',
+    'intro-start': 'On rallume votre caisse…',
+    'download': 'On va chercher votre caisse… (le temps d\'un café ☕)',
+    'extract': 'On déplie les cartons… 📦',
+    'done': 'Caisse déballée, presque prête !',
+    'db': 'On réveille la caisse en douceur…',
+    'web': 'On déroule le tapis du comptoir…',
+    'install-config': 'On installe le tiroir-caisse…',
+    'install-db': 'On remplit les rayons…',
+    'install-admin': 'On accroche l\'enseigne…',
+    'ready': 'C\'est prêt, à vous de jouer ! 🎉',
+    'uninstall': 'On remballe la caisse locale…',
+    'reset': 'On fait le ménage dans la caisse…',
+    'sync-check': 'On regarde si tu as du nouveau dans le cloud…',
+    'sync-seed': 'On rapatrie ta caisse depuis le cloud… ☁️',
+    'sync-import': 'On range tes données dans la caisse…',
+    'sync-changes': 'On récupère tes dernières ventes…',
+    'sync-done': 'Caisse synchronisée ! ✨',
+}
+
+// Mode actif fige au demarrage d'un flux local (pour rester coherent du debut a la fin).
+let activeLoaderMode: LoaderMode = 'prod'
+// Dernière phase affichée : on ne « fond » le texte qu'au CHANGEMENT de phase
+// (sinon les mises à jour rapides — % de téléchargement — font clignoter le texte).
+let lastProgressPhase = ''
+
+// Console temps reel du mode DEBUG (page sombre facon terminal).
+function progressConsoleHtml(title: string): string {
+    const logo = logoDataUri()
+    return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      html,body{height:100%}
+      body{font-family:'Cascadia Code',Consolas,'Courier New',monospace;background:#0b0f1a;color:#cdd6e6;
+        display:flex;flex-direction:column;height:100vh}
+      header{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #1c2640;background:#0e1424}
+      header img{width:24px;height:24px;border-radius:6px}
+      header .t{font-size:13px;font-weight:700;color:#e6edf7}
+      header .tag{margin-left:auto;font-size:10px;font-weight:800;letter-spacing:.12em;color:#ff8a1f;
+        border:1px solid rgba(255,138,31,.45);border-radius:99px;padding:3px 9px}
+      #log{flex:1;overflow-y:auto;padding:12px 16px;font-size:12.5px;line-height:1.7}
+      #log .ln{white-space:pre-wrap;word-break:break-word}
+      #log .ts{color:#5f6f8c}
+      #log .ph{color:#ff8a1f;font-weight:700}
+      #log .pct{color:#6ee7a8}
+      #log .ln.done{color:#6ee7a8}
+      #log::-webkit-scrollbar{width:9px}
+      #log::-webkit-scrollbar-thumb{background:#27324f;border-radius:99px}
+    </style></head><body>
+      <header>
+        ${logo ? `<img src="${logo}" alt="">` : ''}
+        <span class="t">${escapeHtml(title)}</span>
+        <span class="tag">DÉBOGAGE</span>
+      </header>
+      <div id="log"></div>
+    </body></html>`
+}
+
+// Rend la coquille de l'ecran selon le mode actif. `steps` → compteur d'etapes.
+// `subtitle` decrit l'operation en cours (installation, demarrage, desinstallation…).
+function renderLocalShell(steps: boolean, subtitle: string): void {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    activeLoaderMode = getLoaderMode()
+    lastProgressPhase = ''   // nouvelle coquille → la 1re phase doit faire son fondu
+
+    let html: string
+    if (activeLoaderMode === 'debug') {
+        html = progressConsoleHtml('Caisse locale — actions de paramétrage')
+    } else {
+        const dev = activeLoaderMode === 'dev'
+        html = progressHtml({
+            title: 'Caisse <span class="accent">locale</span>',
+            subtitle,
+            message: '',
+            mode: 'local',
+            steps,
+            badge: dev ? 'MODE DEV' : undefined,
+            log: dev,
+        })
+    }
+    void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    if (!mainWindow.isVisible()) mainWindow.show()
+}
+
+// Demarre un flux d'install/demarrage local (avec message d'intro).
+function beginLocalProgress(installing: boolean): void {
+    renderLocalShell(installing, installing ? 'Installation de votre caisse hors-ligne' : 'Démarrage de votre caisse hors-ligne')
+    pushLocalProgress({
+        phase: installing ? 'intro-install' : 'intro-start',
+        message: installing ? 'Préparation de l\'installation locale…' : 'Démarrage de la caisse locale…',
+    })
+}
+
+// Operation ponctuelle (desinstallation / effacement) : pas d'etapes, message unique.
+function showLocalBusy(phase: 'uninstall' | 'reset', subtitle: string, message: string): void {
+    renderLocalShell(false, subtitle)
+    pushLocalProgress({ phase, message })
+}
+
+function jsStr(s: string): string {
+    return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/[\r\n]+/g, ' ')
+}
+
+// Pousse une etape de progression vers l'ecran actif (prod/dev = carte, debug = console).
+function pushLocalProgress(p: { phase?: string; message?: string; pct?: number }): void {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const phase = p.phase ?? ''
+    const tech = p.message ?? ''
+    const step = phaseToStep(p.phase)
+
+    let js: string
+    if (activeLoaderMode === 'debug') {
+        const ts = new Date().toLocaleTimeString('fr-FR', { hour12: false })
+        const pct = p.pct !== undefined ? ` <span class="pct">${Math.max(0, Math.min(100, p.pct))}%</span>` : ''
+        const done = phase === 'ready' || phase === 'done'
+        js = `(()=>{const L=document.getElementById('log');if(!L)return;`
+            + `const d=document.createElement('div');d.className='ln${done ? ' done' : ''}';`
+            + `d.innerHTML='<span class="ts">[${ts}]</span> ${phase ? `<span class="ph">${jsStr(phase)}</span> ` : ''}${jsStr(tech)}${pct}';`
+            + `L.appendChild(d);L.scrollTop=L.scrollHeight;})()`
+    } else {
+        // Carte prod/dev : prod habille le message, dev montre le texte technique.
+        const display = activeLoaderMode === 'prod' ? (FUNNY_BY_PHASE[phase] ?? tech) : tech
+        const msg = jsStr(display)
+        const fade = display !== '' && phase !== lastProgressPhase   // pas de fondu sur les % rapides
+        js = `(()=>{const m=document.getElementById('msg');const f=document.getElementById('fill');`
+            + (display
+                ? (fade
+                    ? `if(m){m.style.opacity='0';setTimeout(()=>{m.textContent='${msg}';m.style.opacity='1'},150);}`
+                    : `if(m){m.textContent='${msg}';m.style.opacity='1';}`)
+                : '')
+            + (p.pct !== undefined ? `if(f)f.style.width='${Math.max(0, Math.min(100, p.pct))}%';` : '')
+            + (step > 0
+                ? `document.querySelectorAll('.seg').forEach(s=>{s.classList.toggle('on',Number(s.dataset.i)<=${step})});`
+                  + `var L=document.getElementById('stepLabel');if(L)L.innerHTML='Étape <b>${step}</b> / 5';`
+                : '')
+            // En mode dev, on journalise aussi le texte technique brut sous la carte.
+            + (activeLoaderMode === 'dev'
+                ? `var G=document.getElementById('devlog');if(G){var d=document.createElement('div');d.className='ln';`
+                  + `d.innerHTML='${phase ? `<span class="ph">${jsStr(phase)}</span> ` : ''}${jsStr(tech)}';`
+                  + `G.appendChild(d);G.scrollTop=G.scrollHeight;}`
+                : '')
+            + `})()`
+    }
+    lastProgressPhase = phase
+    void mainWindow.webContents.executeJavaScript(js).catch(() => { /* page pas encore prete */ })
+}
+
+// Demarre le pack local et charge l'URL (POS ou wizard d'install au 1er run).
+// En cas d'echec, on retombe sur le cloud sans bloquer la caisse.
+async function loadLocalContent(): Promise<void> {
+    if (!mainWindow) return
+    try {
+        // Compteur d'etapes seulement si Dolibarr n'est pas encore installe (1er run).
+        const installing = !getLocalStatus().installed
+        beginLocalProgress(installing)
+        const url = await startLocalDolibarr((info) => pushLocalProgress(info))
+
+        // Synchro Cloud → Local (seed au 1er run, sinon incrémental). Bloque le mode
+        // local si la version Dolibarr de l'instance est incompatible avec le pack.
+        const blocked = await syncLocalFromCloud()
+        if (blocked) return   // message + retour cloud déjà gérés
+
+        await mainWindow.loadURL(url)
+    } catch (err) {
+        writeConfig({ ...readConfig(), localActive: false })
+        buildMenu()
+        showErrorPage({
+            title: 'Caisse locale indisponible',
+            message: 'Impossible de démarrer la caisse locale. « Réessayer » repassera en mode en ligne.',
+            detail: String((err as Error)?.message ?? err),
+        })
+    }
+}
+
+// URL d'instance (acme.cieloo.io) pour identifier la caisse auprès du dashboard.
+function currentInstanceUrl(): string | null {
+    const cfg = readConfig()
+    if (!cfg.instance) return null
+    if (cfg.freeInstance) {
+        try { return new URL(cfg.instance).hostname } catch { return cfg.instance }
+    }
+    return `${cfg.instance}.cieloo.io`
+}
+
+// Lance la synchro cloud→local pendant l'écran de chargement.
+// Renvoie true si le mode local a été BLOQUÉ (version incompatible) → l'appelant stoppe.
+async function syncLocalFromCloud(): Promise<boolean> {
+    const instanceUrl = currentInstanceUrl()
+    if (!instanceUrl) {
+        // Sans instance, aucune synchro possible : on refuse de démarrer sur une base
+        // vierge si la caisse n'a jamais été synchronisée.
+        if (!getSyncState().seeded) {
+            await blockLocalNoSync('Aucune instance Cieloo n\'est configurée pour la synchronisation.')
+            return true
+        }
+        return false
+    }
+
+    const deps: SyncDeps = { dashboardUrl: DASHBOARD_API_URL, terminalKey: TERMINAL_API_KEY, instanceUrl }
+    try {
+        await runCloudSync(deps, (info) => pushLocalProgress(info))
+    } catch (err) {
+        const e = err as Error & { code?: string }
+        if (e.code === 'VERSION_MISMATCH') {
+            writeConfig({ ...readConfig(), localActive: false })
+            buildMenu()
+            await stopLocalDolibarr()
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                await dialog.showMessageBox(mainWindow, {
+                    type: 'warning',
+                    title: 'Caisse locale indisponible',
+                    message: 'Cette instance n\'est pas compatible avec la caisse locale.',
+                    detail: `${e.message}\n\nLa caisse reste en mode en ligne.`,
+                })
+            }
+            loadCloudContent()
+            return true
+        }
+        // Erreur de synchro non bloquante : on démarre quand même la caisse locale…
+        console.error('[cloud-sync] échec non bloquant :', e.message)
+    }
+
+    // …SAUF si la caisse n'a jamais été synchronisée (cloud injoignable au 1er seed) :
+    // on n'ouvre pas un Dolibarr vierge, on repasse en ligne.
+    if (!getSyncState().seeded) {
+        await blockLocalNoSync('Le cloud est injoignable : la première synchronisation n\'a pas pu être réalisée.')
+        return true
+    }
+    return false
+}
+
+// Repasse en mode en ligne quand la caisse locale ne peut pas démarrer faute de
+// première synchronisation. Coupe le moteur local et affiche un message explicite.
+async function blockLocalNoSync(reason: string): Promise<void> {
+    writeConfig({ ...readConfig(), localActive: false })
+    buildMenu()
+    await stopLocalDolibarr()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: 'Caisse locale indisponible',
+            message: 'La caisse locale n\'a jamais été synchronisée avec le cloud.',
+            detail: `${reason}\n\nLa caisse reste en mode en ligne.`,
+        })
+    }
+    loadCloudContent()
+}
+
+// Determine d'où télécharger le pack : un LOCAL_PACK_URL valide (dev) sinon le
+// pack hébergé sur le dashboard (téléchargeable depuis n'importe quelle machine).
+function localPackUrlUsable(u?: string): boolean {
+    if (!u) return false
+    if (/^https?:\/\//i.test(u)) return true
+    try {
+        let p = u
+        if (/^file:\/\//i.test(u)) p = decodeURIComponent(new URL(u).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+        return fs.existsSync(p)
+    } catch { return false }
+}
+
+async function resolvePackSource(): Promise<{ url: string; sha?: string }> {
+    const envUrl = process.env.LOCAL_PACK_URL
+    if (localPackUrlUsable(envUrl)) return { url: envUrl as string }
+    // Pack hébergé sur le dashboard (endpoint public /api/packs).
+    const latest = await fetchLatestPack(DASHBOARD_API_URL)
+    const base = DASHBOARD_API_URL.replace(/\/$/, '')
+    return { url: `${base}/api/packs/${encodeURIComponent(latest.version)}/download`, sha: latest.sha256 }
+}
+
+// Throttle la progression (le téléchargement du pack émet par paquet réseau :
+// sans throttle, des milliers d'executeJavaScript inondent le process → crash).
+function throttleProgress(
+    fn: (i: { phase?: string; pct?: number; message?: string }) => void,
+    everyMs: number,
+): (i: { phase?: string; pct?: number; message?: string }) => void {
+    let last = 0
+    return (i) => {
+        const now = Date.now()
+        if (now - last >= everyMs || i.pct === 100 || i.phase === 'done' || i.phase === 'ready') {
+            last = now
+            fn(i)
+        }
+    }
+}
+
+// Telecharge le pack puis (optionnellement) bascule en local.
+async function installLocalPack(activateAfter: boolean): Promise<boolean> {
+    try {
+        beginLocalProgress(true)
+        const pack = await resolvePackSource()
+        const onProg = throttleProgress((info) => pushLocalProgress(info), 200)
+        await ensureLocalPack({ url: pack.url, expectedSha256: pack.sha, onProgress: onProg })
+        writeConfig({ ...readConfig(), localEnabled: true })
+        buildMenu()   // l'onglet « Caisse Locale » reflete maintenant l'etat installe
+        if (activateAfter) {
+            writeConfig({ ...readConfig(), localActive: true })
+            buildMenu()
+            await loadLocalContent()
+        }
+        return true
+    } catch (err) {
+        writeConfig({ ...readConfig(), localActive: false })
+        buildMenu()
+        showErrorPage({
+            title: 'Échec de l\'installation de la caisse locale',
+            message: 'Le téléchargement ou l\'installation du pack a échoué.',
+            detail: String((err as Error)?.message ?? err),
+        })
+        return false
+    }
+}
+
+// Propose l'installation du mode local au tout premier lancement (une seule fois).
+async function offerLocalModeIfNeeded(): Promise<void> {
+    if (!mainWindow) return
+    const config = readConfig()
+    if (config.localOffered) return
+
+    const res = await dialog.showMessageBox(mainWindow, {
+        type: 'question',
+        buttons: ['Oui, installer la caisse locale', 'Non, plus tard'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'CaisLà — Mode caisse locale',
+        message: 'Installer aussi le mode caisse locale ?',
+        detail: 'Le mode local permet de continuer à encaisser même sans connexion Internet.\n'
+            + 'Un serveur Dolibarr/CielooPos sera installé et fonctionnera entièrement sur ce poste.\n\n'
+            + 'Téléchargement d\'environ 200 Mo. Vous pourrez aussi l\'installer plus tard via le menu.',
+    })
+    writeConfig({ ...readConfig(), localOffered: true })
+    if (res.response === 0) {
+        await installLocalPack(true)
+    }
+}
+
+// Bascule manuelle vers la caisse locale (installe le pack si absent).
+async function switchToLocal(): Promise<void> {
+    if (!isLocalPackPresent()) {
+        await installLocalPack(true)
+        return
+    }
+    // La caisse locale ne doit JAMAIS s'ouvrir sur un Dolibarr vierge : on exige
+    // qu'une première synchronisation cloud→local ait déjà eu lieu.
+    if (!getSyncState().seeded) {
+        const proceed = await promptFirstSyncRequired()
+        if (!proceed) return   // « Retour en ligne » → on reste sur le cloud
+    }
+    writeConfig({ ...readConfig(), localActive: true })
+    buildMenu()
+    await loadLocalContent()
+}
+
+// Aucune synchro n'a encore été faite : on prévient l'utilisateur et on lui laisse
+// le choix. Renvoie true s'il veut synchroniser maintenant (→ on bascule en local et
+// la synchro/seed se fera pendant l'écran de chargement), false pour rester en ligne.
+async function promptFirstSyncRequired(): Promise<boolean> {
+    if (!mainWindow) return false
+    const res = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Synchroniser maintenant', 'Retour en ligne'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'Caisse Locale',
+        message: 'Désolé, la synchronisation n\'a pas encore été faite.',
+        detail: 'La caisse locale n\'a jamais été synchronisée avec le cloud : elle ne peut '
+            + 'pas démarrer sur une base vide.\n\n'
+            + 'Synchronisez-la maintenant (connexion Internet requise) ou revenez en mode en ligne.',
+    })
+    return res.response === 0
+}
+
+// Action manuelle « Synchroniser » du menu Caisse Locale : lance une synchro
+// cloud→local maintenant. Démarre le moteur local au besoin (s'il n'est pas déjà
+// actif), puis le coupe et revient au cloud si on n'était pas en mode local.
+async function syncLocalNow(): Promise<void> {
+    if (!mainWindow) return
+    if (!isLocalPackPresent()) return
+
+    const instanceUrl = currentInstanceUrl()
+    if (!instanceUrl) {
+        await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: 'Synchronisation',
+            message: 'Aucune instance Cieloo configurée.',
+            detail: 'Impossible de synchroniser la caisse locale sans instance Cieloo.',
+        })
+        return
+    }
+
+    const wasActive = Boolean(readConfig().localActive)
+    renderLocalShell(false, 'Synchronisation avec le cloud')
+    pushLocalProgress({ phase: 'sync-check', message: 'Préparation de la synchronisation…' })
+
+    const deps: SyncDeps = { dashboardUrl: DASHBOARD_API_URL, terminalKey: TERMINAL_API_KEY, instanceUrl }
+    let localUrl: string | null = null
+    try {
+        // Le moteur local doit tourner pour importer (démarrage idempotent).
+        localUrl = await startLocalDolibarr((info) => pushLocalProgress(info))
+        const result = await runCloudSync(deps, (info) => pushLocalProgress(info))
+
+        if (wasActive && localUrl) {
+            await mainWindow.loadURL(localUrl)        // on reste en local, POS rechargé à jour
+        } else {
+            await stopLocalDolibarr()                  // on était en ligne → on recoupe le moteur
+            loadCloudContent()
+        }
+
+        await dialog.showMessageBox(mainWindow, {
+            type: result.status === 'offline' ? 'warning' : 'info',
+            title: 'Synchronisation',
+            message: result.status === 'offline'
+                ? 'Le cloud est injoignable : la synchronisation n\'a pas pu être réalisée.'
+                : result.status === 'seeded'
+                    ? 'Première synchronisation réussie : la base locale est désormais une copie du cloud.'
+                    : 'Caisse locale synchronisée avec le cloud.',
+        })
+    } catch (err) {
+        const e = err as Error & { code?: string }
+        if (wasActive && localUrl) {
+            await mainWindow.loadURL(localUrl).catch(() => { /* repli silencieux */ })
+        } else {
+            await stopLocalDolibarr().catch(() => { /* déjà arrêté */ })
+            loadCloudContent()
+        }
+        await dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Synchronisation',
+            message: e.code === 'VERSION_MISMATCH'
+                ? 'Cette instance n\'est pas compatible avec la caisse locale.'
+                : 'La synchronisation a échoué.',
+            detail: e.message,
+        })
+    }
+}
+
+// ─── Ecran de transition « retour en ligne » ────────────────────────────────
+// Fenetre enfant qui recouvre la fenetre principale pendant qu'on coupe la caisse
+// locale et qu'on recharge le cloud, jusqu'a ce que la page distante soit prete.
+let cloudLoaderWindow: BrowserWindow | null = null
+
+function syncCloudLoaderBounds(): void {
+    if (!mainWindow || !cloudLoaderWindow || cloudLoaderWindow.isDestroyed()) return
+    cloudLoaderWindow.setBounds(mainWindow.getContentBounds())
+}
+
+function showCloudLoader(): void {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const html = progressHtml({
+        title: 'Mode <span class="accent">en ligne</span>',
+        subtitle: 'Reconnexion à votre caisse Cieloo',
+        message: 'On vous rebranche au cloud… ⚡',
+        mode: 'cloud',
+    })
+    if (!cloudLoaderWindow || cloudLoaderWindow.isDestroyed()) {
+        cloudLoaderWindow = new BrowserWindow({
+            parent: mainWindow,
+            show: false,
+            frame: false,
+            resizable: false,
+            movable: false,
+            minimizable: false,
+            maximizable: false,
+            closable: false,
+            skipTaskbar: true,
+            hasShadow: false,
+            backgroundColor: '#121b35',
+            webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false },
+        })
+        cloudLoaderWindow.setMenuBarVisibility(false)
+        cloudLoaderWindow.on('closed', () => { cloudLoaderWindow = null })
+    }
+    syncCloudLoaderBounds()
+    void cloudLoaderWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    cloudLoaderWindow.showInactive()
+    cloudLoaderWindow.moveTop()
+}
+
+function hideCloudLoader(): void {
+    if (cloudLoaderWindow && !cloudLoaderWindow.isDestroyed()) cloudLoaderWindow.destroy()
+    cloudLoaderWindow = null
+}
+
+// Retour au mode en ligne (cloud) : on affiche l'ecran de chargement et on le garde
+// jusqu'a ce que la page cloud (ou la page hors-ligne de secours) ait fini de charger.
+async function switchToCloud(): Promise<void> {
+    writeConfig({ ...readConfig(), localActive: false })
+    buildMenu()
+    showCloudLoader()
+    await stopLocalDolibarr()
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        const wc = mainWindow.webContents
+        let settled = false
+        const dismiss = (): void => {
+            if (settled) return
+            settled = true
+            clearTimeout(safety)
+            wc.off('did-finish-load', dismiss)
+            hideCloudLoader()
+        }
+        // did-finish-load couvre le succes ET le repli hors-ligne (offline.html charge
+        // par le handler did-fail-load declenche lui aussi un did-finish-load).
+        const safety = setTimeout(dismiss, 20000)
+        wc.once('did-finish-load', dismiss)
+    }
+
+    loadCloudContent()
+}
+
+// Fenetre « Statut du serveur » : etat des serveurs PHP/Dolibarr + MariaDB, ports,
+// URL, identifiants base, avec actions (ouvrir le POS / l'explorateur de base dans
+// le navigateur, dossier des logs, copier les identifiants…).
+function showLocalServerStatus(): void {
+    if (localStatusWindow && !localStatusWindow.isDestroyed()) {
+        localStatusWindow.webContents.send('local-status:refresh')
+        localStatusWindow.focus()
+        return
+    }
+
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+    localStatusWindow = new BrowserWindow({
+        width: 640,
+        height: 760,
+        useContentSize: true,
+        icon: resolveAppIcon(),
+        title: 'Statut du serveur — Caisse locale',
+        backgroundColor: '#f4f6fb',
+        show: false,
+        resizable: false,
+        parent: parentWindow,
+        webPreferences: {
+            preload: path.join(__dirname, '../preload/index.js'),
+            contextIsolation: true,
+            sandbox: false,
+            nodeIntegration: false,
+        }
+    })
+
+    localStatusWindow.setMenu(null)
+    localStatusWindow.once('ready-to-show', () => localStatusWindow?.show())
+    localStatusWindow.on('closed', () => { localStatusWindow = null })
+
+    if (isDev && process.env.ELECTRON_RENDERER_URL) {
+        void localStatusWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/local-status.html`)
+    } else {
+        void localStatusWindow.loadFile(path.join(__dirname, '../renderer/local-status.html'))
+    }
+}
+
+// Desinstalle la caisse locale (apres confirmation) et revient au cloud.
+async function uninstallLocal(): Promise<void> {
+    if (!mainWindow) return
+    const res = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Désinstaller', 'Annuler'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'Caisse Locale',
+        message: 'Désinstaller la caisse locale ?',
+        detail: 'Le serveur local, sa base de données et toutes les données encaissées en local seront définitivement supprimés de ce poste. Cette action est irréversible.',
+    })
+    if (res.response !== 0) return
+
+    // Si on est en local, repasse au cloud d'abord.
+    if (readConfig().localActive) {
+        writeConfig({ ...readConfig(), localActive: false })
+        loadCloudContent()
+    }
+    try {
+        showLocalBusy('uninstall', 'Désinstallation de la caisse locale', 'Désinstallation de la caisse locale…')
+        await uninstallLocalDolibarr()
+        writeConfig({ ...readConfig(), localActive: false, localEnabled: false })
+        loadCloudContent()
+        buildMenu()
+        dialog.showMessageBox(mainWindow, { type: 'info', title: 'Caisse Locale', message: 'La caisse locale a été désinstallée.' })
+    } catch (err) {
+        dialog.showErrorBox('Caisse Locale', `Échec de la désinstallation :\n${String(err)}`)
+        loadCloudContent()
+        buildMenu()
+    }
+}
+
+// Efface la config locale (base, install Dolibarr, etat) en gardant le pack telecharge.
+// La prochaine bascule en caisse locale relance une installation Dolibarr vierge.
+async function resetLocalConfig(): Promise<void> {
+    if (!mainWindow) return
+    const res = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Effacer', 'Annuler'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'Caisse Locale',
+        message: 'Effacer la configuration locale ?',
+        detail: 'La base de données, la configuration Dolibarr et toutes les données encaissées en local seront définitivement supprimées. '
+            + 'Le pack local (PHP/MariaDB/Dolibarr) est conservé : la prochaine bascule en caisse locale relancera une installation vierge. '
+            + 'Cette action est irréversible.',
+    })
+    if (res.response !== 0) return
+
+    // Si on est en local, repasse au cloud d'abord (on ne peut pas effacer en cours d'usage).
+    if (readConfig().localActive) {
+        writeConfig({ ...readConfig(), localActive: false })
+        loadCloudContent()
+    }
+    try {
+        showLocalBusy('reset', 'Effacement de la configuration locale', 'Effacement de la configuration locale…')
+        await resetLocalConfigDolibarr()
+        loadCloudContent()
+        buildMenu()
+        dialog.showMessageBox(mainWindow, { type: 'info', title: 'Caisse Locale', message: 'La configuration locale a été effacée.' })
+    } catch (err) {
+        dialog.showErrorBox('Caisse Locale', `Échec de l'effacement :\n${String(err)}`)
+        loadCloudContent()
+        buildMenu()
+    }
+}
+
 // ─── Main window ──────────────────────────────────────────────────────────────
 
+// Point d'entree unique : route vers la caisse locale ou le cloud selon la config.
 function loadContent(): void {
+    const config = readConfig()
+    if (config.localActive && isLocalPackPresent()) {
+        void loadLocalContent()
+        return
+    }
+    loadCloudContent()
+}
+
+function loadCloudContent(): void {
     if (!mainWindow) return
     const config = readConfig()
 
@@ -1572,14 +2476,28 @@ window.print=function(){
     // ── Offline: fallback when navigation already started and failed ───────────
     // At this point the PHP page is gone — load a nice local offline page
     // instead of leaving the window blank.
-    mainWindow.webContents.on('did-fail-load', (_e, errorCode, _desc, url, isMainFrame) => {
+    mainWindow.webContents.on('did-fail-load', (_e, errorCode, desc, url, isMainFrame) => {
         if (!isMainFrame) return
-        if (!isCielooUrl(url)) return
-        if (!NET_ERROR_CODES.has(errorCode)) return
-        showMainWindow()
-        loadOfflinePage()
+        if (errorCode === -3) return   // ERR_ABORTED : navigation interrompue normale, on ignore
+        const isAppUrl = isCielooUrl(url) || /^https?:\/\/(127\.0\.0\.1|localhost)/i.test(url)
+        if (!isAppUrl) return
+        // Vraie perte de connectivité → page hors-ligne. Sinon → page d'erreur détaillée.
+        if (OFFLINE_CODES.has(errorCode)) {
+            showMainWindow()
+            loadOfflinePage()
+        } else if (NET_ERROR_CODES.has(errorCode)) {
+            showErrorPage({
+                title: 'Connexion au serveur impossible',
+                message: netErrorMessage(errorCode),
+                detail: `${desc ? desc + '\n' : ''}${url}`,
+                code: errorCode,
+            })
+        }
     })
 
+    // Au lancement, on démarre TOUJOURS en mode en ligne (cloud) par défaut.
+    // L'utilisateur bascule ensuite manuellement en caisse locale via le menu.
+    writeConfig({ ...readConfig(), localActive: false })
     loadContent()
 }
 
@@ -1633,6 +2551,10 @@ function registerIpc(): void {
         void reportRustDeskHeartbeat()
     })
 
+    ipcMain.handle('local:status', () => getLocalStatus())
+    ipcMain.handle('local:switch', (_e, target: 'local' | 'cloud') =>
+        target === 'local' ? switchToLocal() : switchToCloud())
+
     ipcMain.handle('config:toggle-free-instance', () => {
         const config = readConfig()
         const newState = !config.freeInstance
@@ -1652,6 +2574,55 @@ function registerIpc(): void {
         mainWindow?.focus()
     })
 
+    // Config caisse locale : mode de l'ecran de chargement (prod / dev / debug).
+    ipcMain.handle('local:get-loader-mode', (): LoaderMode => getLoaderMode())
+    ipcMain.handle('local:set-loader-mode', (_e, mode: LoaderMode) => {
+        setLoaderMode(mode === 'dev' || mode === 'debug' ? mode : 'prod')
+        return getLoaderMode()
+    })
+
+    // Fenetre « Config » → onglet Pack & serveur : état du pack, chemin, source, URL.
+    ipcMain.handle('local:get-pack-info', async () => {
+        const dbg = getLocalDebugInfo()
+        const configuredUrl = process.env.LOCAL_PACK_URL || null
+        const usingDashboard = !localPackUrlUsable(configuredUrl ?? undefined)
+        let cloud: { version: string; size: number } | null = null
+        let cloudError: string | null = null
+        try {
+            const latest = await fetchLatestPack(DASHBOARD_API_URL)
+            cloud = { version: latest.version, size: latest.size }
+        } catch (e) { cloudError = (e as Error).message }
+        const base = DASHBOARD_API_URL.replace(/\/$/, '')
+        const effectiveUrl = !usingDashboard
+            ? configuredUrl
+            : cloud ? `${base}/api/packs/${encodeURIComponent(cloud.version)}/download` : null
+        return {
+            present: dbg.packPresent,
+            version: dbg.packVersion,
+            paths: dbg.paths,
+            baseUrl: dbg.baseUrl,
+            dbAdminUrl: getDbAdminUrl(),
+            configuredUrl,
+            usingDashboard,
+            effectiveUrl,
+            cloud,
+            cloudError,
+        }
+    })
+
+    // Fenetre « Statut du serveur » : infos + actions.
+    ipcMain.handle('local:get-debug-info', () => ({ ...getLocalDebugInfo(), dbAdminUrl: getDbAdminUrl() }))
+    ipcMain.handle('local:open-external', (_e, url: string) => {
+        if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(url)) void shell.openExternal(url)
+    })
+    ipcMain.handle('local:open-path', (_e, target: string) => { void shell.openPath(target) })
+    ipcMain.handle('local:copy', (_e, text: string) => clipboard.writeText(text))
+    ipcMain.handle('local:open-db-admin', () => {
+        const url = getDbAdminUrl()
+        if (url) void shell.openExternal(url)
+        return url
+    })
+
     ipcMain.handle('dev:reset-config', () => {
         if (!isDev) return
         deleteConfig()
@@ -1662,6 +2633,9 @@ function registerIpc(): void {
         if (!isDev) return
         loadOfflinePage()
     })
+
+    // Bouton « Réessayer » de la page d'erreur → recharge le mode courant (local/cloud).
+    ipcMain.handle('error:retry', () => { loadContent() })
 
     registerAutoLoginIpc()
     registerSettingsIpc(isDev, process.env.ELECTRON_RENDERER_URL, () => mainWindow)
@@ -1951,6 +2925,9 @@ app.whenReady().then(async () => {
     // Affiche le texte par défaut sur l'afficheur client (si activé)
     void pushIdleText()
 
+    // Propose le mode caisse locale au tout premier lancement.
+    void offerLocalModeIfNeeded()
+
     installRustDeskIfNeeded().then(async () => {
         // Essaie immédiatement, puis toutes les 15s jusqu'à obtenir l'ID, ensuite toutes les 60s
         let found = false
@@ -1987,6 +2964,7 @@ app.on('will-quit', () => {
 
 app.on('before-quit', () => {
     void stopLocalMediaServer()
+    void stopLocalDolibarr()
 })
 
 app.on('window-all-closed', () => {

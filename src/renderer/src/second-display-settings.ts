@@ -39,14 +39,40 @@ async function initCustomerDisplay(): Promise<void> {
     const columns = $<HTMLInputElement>('cd-columns')
     const line1 = $<HTMLInputElement>('cd-line1')
     const line2 = $<HTMLInputElement>('cd-line2')
+    const cartMode = $<HTMLSelectElement>('cd-cart-mode')
+    const totalLabel = $<HTMLInputElement>('cd-total-label')
+    const showTotalLabel = $<HTMLInputElement>('cd-show-total-label')
+    const scrollPause = $<HTMLInputElement>('cd-scroll-pause')
+    const scrollStep = $<HTMLInputElement>('cd-scroll-step')
+    const scrollInstant = $<HTMLInputElement>('cd-scroll-instant')
+    const thankYouEnabled = $<HTMLInputElement>('cd-thankyou-enabled')
+    const thankYou1 = $<HTMLInputElement>('cd-thankyou1')
+    const thankYou2 = $<HTMLInputElement>('cd-thankyou2')
+    const thankYouDuration = $<HTMLInputElement>('cd-thankyou-duration')
     const resetTextBtn = $<HTMLButtonElement>('cd-reset-text')
-    const sendBtn = $<HTMLButtonElement>('cd-send')
+    const sendWelcomeBtn = $<HTMLButtonElement>('cd-send-welcome')
+    const sendThankYouBtn = $<HTMLButtonElement>('cd-send-thankyou')
 
-    // Texte au repos par défaut (doit rester aligné avec DEFAULTS côté main).
-    const DEFAULT_LINE1 = 'Bienvenue'
-    const DEFAULT_LINE2 = 'Powered by CaisLà'
+    // Config par défaut "comportement/contenu" (doit rester alignée avec DEFAULTS côté main).
+    // La connexion (port, vitesse, protocole, colonnes, activation) n'est PAS réinitialisée.
+    const CONFIG_DEFAULTS = {
+        line1: 'Bienvenue !',
+        line2: 'Ravi de vous voir',
+        cartMode: 'detailed',
+        totalLabel: 'TOTAL',
+        showTotalLabel: true,
+        scrollStartPauseSec: 0.5,
+        scrollStepMs: 450,
+        scrollInstant: false,
+        thankYouEnabled: true,
+        thankYouLine1: 'Merci !',
+        thankYouLine2: 'A bientot :)',
+        thankYouDurationSec: 5,
+    }
     const previewL1 = $<HTMLSpanElement>('cd-preview-l1')
     const previewL2 = $<HTMLSpanElement>('cd-preview-l2')
+    const tyPreviewL1 = $<HTMLSpanElement>('cd-ty-preview-l1')
+    const tyPreviewL2 = $<HTMLSpanElement>('cd-ty-preview-l2')
 
     const config = await window.cieloo.customerDisplay.getConfig()
 
@@ -75,10 +101,13 @@ async function initCustomerDisplay(): Promise<void> {
         portSelect.value = selected
     }
 
+    const fit = (text: string, cols: number): string => text.slice(0, cols).padEnd(cols, ' ')
     const renderPreview = (): void => {
         const cols = Math.max(8, Math.min(40, parseInt(columns.value, 10) || 20))
-        previewL1.textContent = line1.value.slice(0, cols).padEnd(cols, ' ')
-        previewL2.textContent = line2.value.slice(0, cols).padEnd(cols, ' ')
+        previewL1.textContent = fit(line1.value, cols)
+        previewL2.textContent = fit(line2.value, cols)
+        tyPreviewL1.textContent = fit(thankYou1.value, cols)
+        tyPreviewL2.textContent = fit(thankYou2.value, cols)
     }
 
     // Pré-remplissage depuis la config
@@ -88,6 +117,16 @@ async function initCustomerDisplay(): Promise<void> {
     columns.value = String(config.columns)
     line1.value = config.line1
     line2.value = config.line2
+    cartMode.value = config.cartMode
+    totalLabel.value = config.totalLabel
+    showTotalLabel.checked = config.showTotalLabel
+    scrollPause.value = String(config.scrollStartPauseSec)
+    scrollStep.value = String(config.scrollStepMs)
+    scrollInstant.checked = config.scrollInstant
+    thankYouEnabled.checked = config.thankYouEnabled
+    thankYou1.value = config.thankYouLine1
+    thankYou2.value = config.thankYouLine2
+    thankYouDuration.value = String(config.thankYouDurationSec)
     await refreshPorts(config.port)
     renderPreview()
 
@@ -99,6 +138,16 @@ async function initCustomerDisplay(): Promise<void> {
         columns: parseInt(columns.value, 10) || 20,
         line1: line1.value,
         line2: line2.value,
+        cartMode: cartMode.value as 'total' | 'detailed',
+        totalLabel: totalLabel.value,
+        showTotalLabel: showTotalLabel.checked,
+        scrollStartPauseSec: parseFloat(scrollPause.value) || 0,
+        scrollStepMs: parseInt(scrollStep.value, 10) || 450,
+        scrollInstant: scrollInstant.checked,
+        thankYouEnabled: thankYouEnabled.checked,
+        thankYouLine1: thankYou1.value,
+        thankYouLine2: thankYou2.value,
+        thankYouDurationSec: parseInt(thankYouDuration.value, 10) || 5,
     })
 
     const persist = async (): Promise<void> => {
@@ -110,32 +159,53 @@ async function initCustomerDisplay(): Promise<void> {
     baud.addEventListener('change', persist)
     protocol.addEventListener('change', persist)
     columns.addEventListener('change', () => { renderPreview(); void persist() })
-    line1.addEventListener('input', renderPreview)
-    line2.addEventListener('input', renderPreview)
-    line1.addEventListener('change', persist)
-    line2.addEventListener('change', persist)
+    for (const el of [line1, line2, thankYou1, thankYou2]) {
+        el.addEventListener('input', renderPreview)
+    }
+    for (const el of [line1, line2, totalLabel, thankYou1, thankYou2, thankYouDuration, scrollPause, scrollStep]) {
+        el.addEventListener('change', persist)
+    }
+    cartMode.addEventListener('change', persist)
+    showTotalLabel.addEventListener('change', persist)
+    scrollInstant.addEventListener('change', persist)
+    thankYouEnabled.addEventListener('change', persist)
 
     refreshBtn.addEventListener('click', async () => {
         await refreshPorts(portSelect.value)
         toast('Liste des ports rafraîchie')
     })
 
+    // Réinitialise TOUTE la config contenu/comportement (garde la connexion).
     resetTextBtn.addEventListener('click', async () => {
-        line1.value = DEFAULT_LINE1
-        line2.value = DEFAULT_LINE2
+        line1.value = CONFIG_DEFAULTS.line1
+        line2.value = CONFIG_DEFAULTS.line2
+        cartMode.value = CONFIG_DEFAULTS.cartMode
+        totalLabel.value = CONFIG_DEFAULTS.totalLabel
+        showTotalLabel.checked = CONFIG_DEFAULTS.showTotalLabel
+        scrollPause.value = String(CONFIG_DEFAULTS.scrollStartPauseSec)
+        scrollStep.value = String(CONFIG_DEFAULTS.scrollStepMs)
+        scrollInstant.checked = CONFIG_DEFAULTS.scrollInstant
+        thankYouEnabled.checked = CONFIG_DEFAULTS.thankYouEnabled
+        thankYou1.value = CONFIG_DEFAULTS.thankYouLine1
+        thankYou2.value = CONFIG_DEFAULTS.thankYouLine2
+        thankYouDuration.value = String(CONFIG_DEFAULTS.thankYouDurationSec)
         renderPreview()
         await persist()
-        toast('Texte au repos réinitialisé')
+        toast('Configuration réinitialisée')
     })
 
-    sendBtn.addEventListener('click', async () => {
+    // Envoi de test générique sur l'afficheur.
+    const testSend = async (btn: HTMLButtonElement, l1: string, l2: string): Promise<void> => {
         if (!portSelect.value) { toast('Sélectionnez d\'abord un port série'); return }
-        sendBtn.disabled = true
+        btn.disabled = true
         await persist()
-        const result = await window.cieloo.customerDisplay.send(line1.value, line2.value, currentConfig())
-        sendBtn.disabled = false
+        const result = await window.cieloo.customerDisplay.send(l1, l2, currentConfig())
+        btn.disabled = false
         toast(result.success ? 'Texte envoyé à l\'afficheur' : `Échec : ${result.message ?? 'erreur inconnue'}`)
-    })
+    }
+
+    sendWelcomeBtn.addEventListener('click', () => testSend(sendWelcomeBtn, line1.value, line2.value))
+    sendThankYouBtn.addEventListener('click', () => testSend(sendThankYouBtn, thankYou1.value, thankYou2.value))
 }
 
 async function init(): Promise<void> {

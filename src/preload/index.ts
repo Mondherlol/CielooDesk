@@ -2,6 +2,21 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { initAutoLoginPreload } from '../modules/auto-login/preload'
 import type { AppSettings, PrintSettings, CustomerDisplaySettings } from '../modules/settings/main'
 import type { PrintServerStatus } from '../modules/print-server/main'
+import type { LocalDebugInfo } from '../modules/local-dolibarr/main'
+
+type LocalDebugInfoUI = LocalDebugInfo & { dbAdminUrl: string | null }
+type LocalPackInfoUI = {
+    present: boolean
+    version: string | null
+    paths: LocalDebugInfo['paths']
+    baseUrl: string | null
+    dbAdminUrl: string | null
+    configuredUrl: string | null
+    usingDashboard: boolean
+    effectiveUrl: string | null
+    cloud: { version: string; size: number } | null
+    cloudError: string | null
+}
 
 // ─── IPC Bridge ───────────────────────────────────────────────────────────────
 
@@ -107,6 +122,28 @@ contextBridge.exposeInMainWorld('cieloo', {
             ipcRenderer.invoke('tech:ping-nacef', port),
     },
 
+    local: {
+        getLoaderMode: (): Promise<'prod' | 'dev' | 'debug'> =>
+            ipcRenderer.invoke('local:get-loader-mode'),
+        setLoaderMode: (mode: 'prod' | 'dev' | 'debug'): Promise<'prod' | 'dev' | 'debug'> =>
+            ipcRenderer.invoke('local:set-loader-mode', mode),
+        getDebugInfo: (): Promise<LocalDebugInfoUI> =>
+            ipcRenderer.invoke('local:get-debug-info'),
+        getPackInfo: (): Promise<LocalPackInfoUI> =>
+            ipcRenderer.invoke('local:get-pack-info'),
+        openExternal: (url: string): Promise<void> =>
+            ipcRenderer.invoke('local:open-external', url),
+        openPath: (target: string): Promise<void> =>
+            ipcRenderer.invoke('local:open-path', target),
+        copy: (text: string): Promise<void> =>
+            ipcRenderer.invoke('local:copy', text),
+        openDbAdmin: (): Promise<string | null> =>
+            ipcRenderer.invoke('local:open-db-admin'),
+        onRefresh: (cb: () => void) => {
+            ipcRenderer.on('local-status:refresh', () => cb())
+        },
+    },
+
     nav: {
         goBack: (): Promise<void> => ipcRenderer.invoke('nav:go-back'),
         goForward: (): Promise<void> => ipcRenderer.invoke('nav:go-forward'),
@@ -117,6 +154,11 @@ contextBridge.exposeInMainWorld('cieloo', {
     net: {
         reloadLast: (): Promise<void> => ipcRenderer.invoke('net:reload-last'),
         check: (): Promise<boolean> => ipcRenderer.invoke('net:check'),
+    },
+
+    errorPage: {
+        retry: (): Promise<void> => ipcRenderer.invoke('error:retry'),
+        copy: (text: string): Promise<void> => ipcRenderer.invoke('local:copy', text),
     },
 
     app: {
@@ -246,15 +288,30 @@ ipcRenderer.on('settings:updated', () => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Vraie page web (POS cloud OU caisse locale http) — exclut data:/file:/about:.
+// Sert au reset de marges. (Les écrans de chargement sont des URL data: → exclus.)
 function isExternalPage(): boolean {
-    const h = window.location.href
-    return !h.startsWith('file://') && !h.includes('localhost')
+    return /^https?:\/\//i.test(window.location.href) && !window.location.href.includes('localhost')
+}
+
+// Page POS *cloud* uniquement (cieloo.io / instance distante). L'overlay « hors-ligne »
+// ne doit s'afficher QUE là : jamais sur la caisse locale (127.0.0.1), ni sur les
+// écrans de chargement (data:), ni sur nos fenêtres internes.
+function isCloudPage(): boolean {
+    try {
+        const u = new URL(window.location.href)
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
+        return u.hostname !== 'localhost' && u.hostname !== '127.0.0.1'
+    } catch { return false }
 }
 
 
 // ─── Injected keyframe styles (into <html> early, before body exists) ─────────
 
 function injectBaseStyles(): void {
+    // Ne JAMAIS toucher nos propres fenetres d'UI (config, statut, settings…) :
+    // le reset margin/padding:0!important est reserve a la page POS externe.
+    if (isSettingsPage()) return
     if (!isExternalPage()) return
     if (!document.documentElement) return
     const s = document.createElement('style')
@@ -279,13 +336,19 @@ function isSettingsPage(): boolean {
         || href.includes('second-display-settings.html')
         || href.includes('contact.html')
         || href.includes('tech-config.html')
+        || href.includes('local-config.html')
+        || href.includes('local-status.html')
+        || href.includes('error.html')
 }
 
 function runInjections(): void {
     if (isSettingsPage()) return
+    // Uniquement sur les vraies pages POS (http cloud/local) — jamais sur les écrans
+    // de chargement (data:) ni nos fenêtres internes (file:).
+    if (!isExternalPage()) return
     injectSplash()
     injectUpdateToast()
-    if (isExternalPage()) injectOverlays()
+    injectOverlays()
 }
 
 // Always register for every future page navigation
@@ -296,6 +359,15 @@ if (document.readyState !== 'loading') runInjections()
 // ─── Splash + offline overlays ────────────────────────────────────────────────
 
 function injectOverlays(): void {
+    // Vérification imprimante : sur toute page caisse (cloud OU locale).
+    if (isCaissePage()) {
+        void checkPrinter(false)
+        setInterval(() => void checkPrinter(false), 30_000)
+    }
+
+    // L'overlay « hors-ligne » ne concerne QUE le POS cloud (dépend d'Internet).
+    // Sur la caisse locale (127.0.0.1) ou un écran de chargement, on n'injecte rien.
+    if (!isCloudPage()) return
     if (document.getElementById('cieloo-overlays')) return
 
     // ── SVG icons ─────────────────────────────────────────────────────────────
@@ -552,13 +624,6 @@ function injectOverlays(): void {
     // Boot: if already offline when the page loads
     if (!navigator.onLine) showOverlay()
     else scheduleBgCheck()
-
-    // ── Vérification imprimante (caisse uniquement) ────────────────────────────
-    if (isCaissePage()) {
-        void checkPrinter(false)
-        // Fallback poll (30s) for physical reconnection events not covered by IPC events
-        setInterval(() => void checkPrinter(false), 30_000)
-    }
 }
 
 // ─── Printer check ────────────────────────────────────────────────────────────

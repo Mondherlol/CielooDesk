@@ -1,8 +1,9 @@
 const style = document.createElement('style')
 style.textContent = `
   :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  html, body { overflow: hidden; }
   body { margin: 0; background: #f8fafc; color: #1f2937; }
-  .ue-shell { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; }
+  .ue-shell { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; box-sizing: border-box; }
   .ue-label { font-size: .8rem; font-weight: 600; color: #6b7280; }
   .ue-input {
     width: 100%; box-sizing: border-box; padding: 9px 11px;

@@ -14,7 +14,7 @@
 
   <nav class="settings-sidebar">
     <div class="sidebar-brand">
-      <img class="sidebar-brand-logo" src="/512_rounded.png" alt="CielooPos" />
+      <img class="sidebar-brand-logo" src="/logo_CaisLa.png" alt="CaisLà" />
       <span class="sidebar-brand-name">Parametres second afficheur</span>
     </div>
 
@@ -155,45 +155,146 @@
       </div>
 
       <div class="section">
-        <p class="section-title">Texte à afficher</p>
+        <p class="section-title">Message d'accueil (panier vide)</p>
+
+        <div class="cd-msg-grid">
+          <div class="cd-msg-fields">
+            <div class="cd-msg-field">
+              <label for="cd-line1">Ligne 1</label>
+              <input class="setting-input" id="cd-line1" type="text" maxlength="40" placeholder="Bienvenue !" />
+            </div>
+            <div class="cd-msg-field">
+              <label for="cd-line2">Ligne 2</label>
+              <input class="setting-input" id="cd-line2" type="text" maxlength="40" placeholder="Ravi de vous voir" />
+            </div>
+          </div>
+          <div class="cd-msg-preview">
+            <span class="cd-preview-caption">Aperçu</span>
+            <div class="cd-preview"><span id="cd-preview-l1"></span><span id="cd-preview-l2"></span></div>
+          </div>
+        </div>
+
+        <div class="setting-actions" style="justify-content:flex-end;margin-top:14px">
+          <button class="btn btn-default" id="cd-send-welcome">Envoyer / Tester</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Pendant une vente</p>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Texte au repos</span>
-            <span class="setting-desc">Message affiché quand le panier est vide</span>
+            <span class="setting-label">Affichage</span>
+            <span class="setting-desc">Total seul, ou total + nom &amp; prix du dernier article scanné</span>
           </div>
-          <button class="btn btn-ghost" id="cd-reset-text">Remettre par défaut</button>
+          <select class="setting-select" id="cd-cart-mode">
+            <option value="detailed">Total + dernier article</option>
+            <option value="total">Total seul</option>
+          </select>
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Ligne 1</span>
+            <span class="setting-label">Libellé du total</span>
+            <span class="setting-desc">Ligne du haut en mode « Total seul » ; préfixe du total en mode détaillé</span>
           </div>
-          <input class="setting-input" id="cd-line1" type="text" maxlength="40" placeholder="Bienvenue chez ..." />
+          <input class="setting-input" id="cd-total-label" type="text" maxlength="40" placeholder="TOTAL" style="width:160px" />
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Ligne 2</span>
+            <span class="setting-label">Afficher le libellé devant le total</span>
+            <span class="setting-desc">Mode détaillé : affiche « TOTAL : 12,500 » au lieu du montant seul</span>
           </div>
-          <input class="setting-input" id="cd-line2" type="text" maxlength="40" placeholder="Powered by CaisLà" />
+          <label class="toggle">
+            <input type="checkbox" id="cd-show-total-label" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Défilement du nom (mode détaillé)</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Pause au début (secondes)</span>
+            <span class="setting-desc">Le nom reste immobile sur son début avant de défiler</span>
+          </div>
+          <input class="setting-input" id="cd-scroll-pause" type="number" min="0" max="10" step="0.5" style="width:90px" />
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Aperçu</span>
-            <span class="setting-desc">Rendu approximatif (largeur = colonnes configurées)</span>
+            <span class="setting-label">Vitesse (ms par pas)</span>
+            <span class="setting-desc">Plus petit = défilement plus rapide</span>
           </div>
-          <div class="cd-preview" id="cd-preview"><span id="cd-preview-l1"></span><span id="cd-preview-l2"></span></div>
+          <input class="setting-input" id="cd-scroll-step" type="number" min="50" max="2000" step="50" style="width:90px" />
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Envoyer sur l'afficheur</span>
-            <span class="setting-desc">Enregistre la configuration puis affiche le texte ci-dessus</span>
+            <span class="setting-label">Défilement instantané</span>
+            <span class="setting-desc">Bascule directement début ↔ fin au lieu d'un défilement fluide</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="cd-scroll-instant" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Message de fin de vente</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Afficher un message après l'encaissement</span>
+            <span class="setting-desc">S'affiche quelques instants puis revient à l'accueil</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="cd-thankyou-enabled" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="cd-msg-grid">
+          <div class="cd-msg-fields">
+            <div class="cd-msg-field">
+              <label for="cd-thankyou1">Ligne 1</label>
+              <input class="setting-input" id="cd-thankyou1" type="text" maxlength="40" placeholder="Merci !" />
+            </div>
+            <div class="cd-msg-field">
+              <label for="cd-thankyou2">Ligne 2</label>
+              <input class="setting-input" id="cd-thankyou2" type="text" maxlength="40" placeholder="A bientot :)" />
+            </div>
+          </div>
+          <div class="cd-msg-preview">
+            <span class="cd-preview-caption">Aperçu</span>
+            <div class="cd-preview"><span id="cd-ty-preview-l1"></span><span id="cd-ty-preview-l2"></span></div>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Durée d'affichage (secondes)</span>
+          </div>
+          <input class="setting-input" id="cd-thankyou-duration" type="number" min="1" max="60" step="1" style="width:90px" />
+        </div>
+
+        <div class="setting-actions" style="justify-content:flex-end;margin-top:14px">
+          <button class="btn btn-default" id="cd-send-thankyou">Envoyer / Tester</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Réinitialiser</span>
+            <span class="setting-desc">Restaure toute la configuration de l'afficheur (textes, total, défilement, fin de vente) — la connexion (port, vitesse) est conservée</span>
           </div>
           <div class="setting-actions">
-            <button class="btn btn-default" id="cd-send">Envoyer / Tester</button>
+            <button class="btn btn-ghost" id="cd-reset-text">Remettre par défaut</button>
           </div>
         </div>
       </div>
