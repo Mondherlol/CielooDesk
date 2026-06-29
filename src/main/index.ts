@@ -25,6 +25,10 @@ import { startSecondScreen, syncSecondScreen } from '../modules/second-screen/ma
 import { initAutoUpdater, registerUpdaterIpc } from '../modules/updater/main'
 import { registerCustomerDisplayIpc, pushIdleText } from '../modules/customer-display/main'
 import {
+    registerBalanceIpc, startBalance, stopBalance, generateBalanceFile,
+    launchDfsApp, isRgiRunning, selectRgiPath, type DfsApp,
+} from '../modules/balance/main'
+import {
     ensurePack as ensureLocalPack,
     startLocal as startLocalDolibarr,
     stopLocal as stopLocalDolibarr,
@@ -493,6 +497,7 @@ function showErrorPage(opts: { title?: string; message: string; detail?: string;
 }
 let printSettingsWindow: BrowserWindow | null = null
 let barcodeSettingsWindow: BrowserWindow | null = null
+let balanceSettingsWindow: BrowserWindow | null = null
 let secondDisplaySettingsWindow: BrowserWindow | null = null
 let loadingOverlayWindow: BrowserWindow | null = null
 let loadingOverlayShownAt = 0
@@ -859,6 +864,82 @@ function toggleFocusedWindowDevTools(): void {
     focusedWindow?.webContents.toggleDevTools()
 }
 
+// État RGI mis en cache pour le libellé du menu (rafraîchi par un poller léger).
+let rgiRunningCache = false
+
+async function refreshRgiStatus(): Promise<void> {
+    const running = await isRgiRunning()
+    if (running !== rgiRunningCache) {
+        rgiRunningCache = running
+        buildMenu()
+    }
+}
+
+/** Affiche un toast flottant dans la fenêtre principale (page caisse). */
+function showMainToast(message: string, kind: 'ok' | 'error' = 'ok'): void {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const accent = kind === 'error' ? '#dc2626' : '#16a34a'
+    const js = `(() => { try {
+        let t = document.getElementById('_cl_balance_toast');
+        if (!t) { t = document.createElement('div'); t.id = '_cl_balance_toast'; document.body.appendChild(t); }
+        const s = t.style;
+        s.position='fixed'; s.zIndex='2147483647'; s.bottom='26px'; s.left='50%'; s.transform='translateX(-50%) translateY(8px)';
+        s.maxWidth='80vw'; s.padding='13px 20px'; s.borderRadius='12px'; s.background='#0f172a'; s.color='#fff';
+        s.font='600 14px system-ui,Segoe UI,sans-serif'; s.boxShadow='0 10px 34px rgba(0,0,0,.28)';
+        s.borderLeft='4px solid ${accent}'; s.opacity='0'; s.transition='opacity .25s ease, transform .25s ease'; s.pointerEvents='none';
+        t.textContent = ${JSON.stringify(message)};
+        requestAnimationFrame(() => { s.opacity='1'; s.transform='translateX(-50%) translateY(0)'; });
+        clearTimeout(window.__clBalanceToastTimer);
+        window.__clBalanceToastTimer = setTimeout(() => { s.opacity='0'; s.transform='translateX(-50%) translateY(8px)'; }, 3400);
+    } catch (e) {} })();`
+    void mainWindow.webContents.executeJavaScript(js).catch(() => { /* page pas prête */ })
+}
+
+async function downloadBalanceFromMenu(): Promise<void> {
+    const r = await generateBalanceFile({ force: true })
+    if (!r.ok) {
+        showMainToast(`Balance — échec : ${r.error ?? 'erreur inconnue'}`, 'error')
+        return
+    }
+    showMainToast(
+        r.written
+            ? `Balance — ${r.count} article(s) téléchargé(s) ✓`
+            : `Balance — déjà à jour (${r.count} article(s))`,
+        'ok',
+    )
+}
+
+async function launchDfsAppFromMenu(appName: DfsApp): Promise<void> {
+    let result = await launchDfsApp(appName)
+
+    if (result.status === 'not_found') {
+        // Pour RGI, on propose de localiser l'exe (et on mémorise le chemin).
+        if (appName === 'RGI' && await selectRgiPath()) {
+            result = await launchDfsApp(appName)
+        } else {
+            await dialog.showMessageBox({
+                type: 'warning',
+                title: `${appName} introuvable`,
+                message: `${appName}.exe n'a pas été trouvé.`,
+                detail: `Vérifiez l'installation DFS (par défaut C:\\Program Files (x86)\\DFS\\${appName}\\${appName}.exe).`,
+            })
+            return
+        }
+    }
+
+    if (result.status === 'already') {
+        await dialog.showMessageBox({ type: 'info', title: appName, message: `${appName} est déjà lancé.` })
+    } else if (result.status === 'error') {
+        await dialog.showMessageBox({
+            type: 'error',
+            title: appName,
+            message: `Impossible de lancer ${appName}.`,
+            detail: result.error ?? '',
+        })
+    }
+    if (appName === 'RGI') void refreshRgiStatus()
+}
+
 // Called once on start and whenever shortcuts change
 function buildMenu(): void {
     const sc = loadSettings().shortcuts
@@ -947,6 +1028,22 @@ function buildMenu(): void {
             label: 'Parametres second afficheur',
             click: () => openSecondDisplaySettingsWindow()
         }
+    ]
+
+    // Menu « Balance » (barre du haut) — visible uniquement quand le mode est activé.
+    const balanceSubmenu: Electron.MenuItemConstructorOptions[] = [
+        { label: 'Synchroniser les produits maintenant', click: () => void downloadBalanceFromMenu() },
+        { label: 'Configuration…', click: () => openBalanceSettingsWindow() },
+        { type: 'separator' },
+        { label: rgiRunningCache ? 'RGI : en cours d\'exécution' : 'RGI : arrêté', enabled: false },
+        {
+            label: 'Lancer RGI',
+            enabled: !rgiRunningCache,
+            click: () => void launchDfsAppFromMenu('RGI'),
+        },
+        { type: 'separator' },
+        { label: 'Lancer DGI', click: () => void launchDfsAppFromMenu('DGI') },
+        { label: 'Lancer DFS', click: () => void launchDfsAppFromMenu('DFS') },
     ]
 
     const rustdeskId = getRustDeskId()
@@ -1081,8 +1178,14 @@ function buildMenu(): void {
         { label: 'Affichage', submenu: affichageSubmenu },
         { label: 'Paramètres', submenu: paramsSubmenu },
         { label: 'Caisse Locale', submenu: caisseLocaleSubmenu },
-        { label: 'Support', submenu: supportSubmenu }
     ]
+
+    // « Balance » juste avant « Support », seulement si le mode est activé.
+    if (loadSettings().balance.enabled) {
+        menuTemplate.push({ label: 'Balance', submenu: balanceSubmenu })
+    }
+
+    menuTemplate.push({ label: 'Support', submenu: supportSubmenu })
 
     if (isDev || loadSettings().devMode) {
         menuTemplate.push({ label: 'Dev', submenu: devSubmenu })
@@ -1182,6 +1285,53 @@ function openBarcodeSettingsWindow(): void {
         void barcodeSettingsWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/barcode-settings.html`)
     } else {
         void barcodeSettingsWindow.loadFile(path.join(__dirname, '../renderer/barcode-settings.html'))
+    }
+}
+
+function openBalanceSettingsWindow(): void {
+    if (balanceSettingsWindow && !balanceSettingsWindow.isDestroyed()) {
+        balanceSettingsWindow.focus()
+        return
+    }
+
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+    balanceSettingsWindow = new BrowserWindow({
+        width: 780,
+        height: 680,
+        minWidth: 720,
+        minHeight: 580,
+        icon: resolveAppIcon(),
+        title: 'Balance - CielooPos',
+        backgroundColor: '#f3f5f8',
+        show: false,
+        parent: parentWindow,
+        webPreferences: {
+            preload: path.join(__dirname, '../preload/index.js'),
+            contextIsolation: true,
+            sandbox: false,
+            nodeIntegration: false,
+            spellcheck: false,
+        },
+    })
+
+    balanceSettingsWindow.setMenu(null)
+    balanceSettingsWindow.webContents.on('before-input-event', (_e, input) => {
+        if (input.key === 'F12' && input.type === 'keyDown') {
+            balanceSettingsWindow?.webContents.toggleDevTools()
+        }
+    })
+    balanceSettingsWindow.once('ready-to-show', () => {
+        balanceSettingsWindow?.show()
+    })
+    balanceSettingsWindow.on('closed', () => {
+        balanceSettingsWindow = null
+    })
+
+    if (isDev && process.env.ELECTRON_RENDERER_URL) {
+        void balanceSettingsWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/balance-settings.html`)
+    } else {
+        void balanceSettingsWindow.loadFile(path.join(__dirname, '../renderer/balance-settings.html'))
     }
 }
 
@@ -1761,13 +1911,13 @@ function pushLocalProgress(p: { phase?: string; message?: string; pct?: number }
             + (p.pct !== undefined ? `if(f)f.style.width='${Math.max(0, Math.min(100, p.pct))}%';` : '')
             + (step > 0
                 ? `document.querySelectorAll('.seg').forEach(s=>{s.classList.toggle('on',Number(s.dataset.i)<=${step})});`
-                  + `var L=document.getElementById('stepLabel');if(L)L.innerHTML='Étape <b>${step}</b> / 5';`
+                + `var L=document.getElementById('stepLabel');if(L)L.innerHTML='Étape <b>${step}</b> / 5';`
                 : '')
             // En mode dev, on journalise aussi le texte technique brut sous la carte.
             + (activeLoaderMode === 'dev'
                 ? `var G=document.getElementById('devlog');if(G){var d=document.createElement('div');d.className='ln';`
-                  + `d.innerHTML='${phase ? `<span class="ph">${jsStr(phase)}</span> ` : ''}${jsStr(tech)}';`
-                  + `G.appendChild(d);G.scrollTop=G.scrollHeight;}`
+                + `d.innerHTML='${phase ? `<span class="ph">${jsStr(phase)}</span> ` : ''}${jsStr(tech)}';`
+                + `G.appendChild(d);G.scrollTop=G.scrollHeight;}`
                 : '')
             + `})()`
     }
@@ -2640,6 +2790,8 @@ function registerIpc(): void {
     registerAutoLoginIpc()
     registerSettingsIpc(isDev, process.env.ELECTRON_RENDERER_URL, () => mainWindow)
     registerCustomerDisplayIpc()
+    registerBalanceIpc(buildMenu)
+    ipcMain.handle('balance:open-settings', () => openBalanceSettingsWindow())
     onRebuildMenu(buildMenu)
 
     // ── Impression (CielooPrint local server) ───────────────────────────────
@@ -2915,6 +3067,10 @@ function registerIpc(): void {
 app.whenReady().then(async () => {
     await startLocalMediaServer()
     void startPrintServer(loadSettings().print)
+    startBalance({ resolveBase: resolveCielooBase, resolveOrigin: resolveCielooOrigin })
+    // Statut RGI dans le menu Balance : 1ère vérif + rafraîchissement périodique.
+    if (loadSettings().balance.enabled) void refreshRgiStatus()
+    setInterval(() => { if (loadSettings().balance.enabled) void refreshRgiStatus() }, 12_000)
 
     buildMenu()
     registerIpc()
@@ -2960,6 +3116,7 @@ app.whenReady().then(async () => {
 app.on('will-quit', () => {
     globalShortcut.unregisterAll()
     void stopPrintServer()
+    stopBalance()
 })
 
 app.on('before-quit', () => {

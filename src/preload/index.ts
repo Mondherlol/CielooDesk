@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { initAutoLoginPreload } from '../modules/auto-login/preload'
-import type { AppSettings, PrintSettings, CustomerDisplaySettings } from '../modules/settings/main'
+import type { AppSettings, PrintSettings, CustomerDisplaySettings, BalanceSettings } from '../modules/settings/main'
 import type { PrintServerStatus } from '../modules/print-server/main'
+import type { BalanceGenResult, BalancePreview } from '../modules/balance/main'
 import type { LocalDebugInfo } from '../modules/local-dolibarr/main'
 
 type LocalDebugInfoUI = LocalDebugInfo & { dbAdminUrl: string | null }
@@ -113,6 +114,26 @@ contextBridge.exposeInMainWorld('cieloo', {
     multiprint: {
         getSections: (): Promise<{ sections: unknown[] | null; error?: string }> =>
             ipcRenderer.invoke('multiprint:get-sections'),
+    },
+
+    balance: {
+        getConfig: (): Promise<BalanceSettings> =>
+            ipcRenderer.invoke('balance:get-config'),
+        saveConfig: (payload: Partial<BalanceSettings>): Promise<BalanceSettings> =>
+            ipcRenderer.invoke('balance:save-config', payload),
+        selectFolder: (): Promise<string | null> =>
+            ipcRenderer.invoke('balance:select-folder'),
+        generateNow: (): Promise<BalanceGenResult> =>
+            ipcRenderer.invoke('balance:generate-now'),
+        preview: (): Promise<BalancePreview> =>
+            ipcRenderer.invoke('balance:preview'),
+        getStatus: (): Promise<{ lastWrittenAt?: string; lastCount?: number }> =>
+            ipcRenderer.invoke('balance:get-status'),
+        openSettings: (): Promise<void> =>
+            ipcRenderer.invoke('balance:open-settings'),
+        onStatusUpdated: (cb: (result: BalanceGenResult) => void) => {
+            ipcRenderer.on('balance:status-updated', (_e, result: BalanceGenResult) => cb(result))
+        },
     },
 
     tech: {

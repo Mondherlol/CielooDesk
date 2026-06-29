@@ -88,6 +88,45 @@ export const CUSTOMER_DISPLAY_TEXT_DEFAULTS = {
     thankYouLine2: 'A bientot :)',
 } as const
 
+/** Correspondance taux TVA (du produit) → ID TVA interne de la balance Dibal. */
+export interface BalanceTvaMapping {
+    /** Taux TVA tel que stocké dans Dolibarr (ex. 5.5, 10, 20) */
+    taux: number
+    /** ID TVA interne attendu par la balance (col. 4 du fichier LinéoSoft) */
+    id: number
+}
+
+/**
+ * Mode balance (Dibal / profil LinéoSoft via DFS+RGI).
+ * CielooDesk génère un Articles.txt (TAB, Windows-1252) déposé dans le dossier
+ * surveillé par RGI, qui l'envoie à la balance.
+ */
+export interface BalanceSettings {
+    enabled: boolean
+    /** Dossier surveillé par RGI où déposer Articles.txt (ex. C:\Joolan\Balance\plu) */
+    exportFolder: string | null
+    /** Nom du fichier généré (RGI attend "Articles.txt" par défaut) */
+    fileName: string
+    /** Type d'article envoyé (2 = pesé/KG, 1 = unité) */
+    defaultType: number
+    /** Nombre de décimales du prix (TND = 3 / millimes) */
+    priceDecimals: number
+    /** Longueur max du libellé (le champ LinéoSoft fait 30) */
+    nameMaxLength: number
+    /** Table de correspondance taux TVA → ID TVA balance */
+    tvaMap: BalanceTvaMapping[]
+    /** ID TVA de repli si le taux n'est pas dans la table */
+    defaultTvaId: number
+    /** Intervalle de rafraîchissement auto en minutes (0 = désactivé) */
+    refreshIntervalMin: number
+    /** Port du webhook loopback déclenché par le trigger Dolibarr (0 = désactivé) */
+    webhookPort: number
+    /** Token API Dolibarr (auth headless, sinon on tente la session ouverte) */
+    apiKey: string
+    /** Chemin de RGI.exe (vide = auto-détection dans Program Files) */
+    rgiPath: string
+}
+
 export interface AppSettings {
     autoLogin: boolean
     fullscreen: boolean
@@ -99,11 +138,18 @@ export interface AppSettings {
     shortcuts: ShortcutMap
     print: PrintSettings
     customerDisplay: CustomerDisplaySettings
+    balance: BalanceSettings
     requirePrinter: boolean
     serialNumber: string
     terminalName: string
     devMode: boolean
 }
+
+export const DEFAULT_BALANCE_TVA_MAP: BalanceTvaMapping[] = [
+    { taux: 5.5, id: 1 },
+    { taux: 10, id: 3 },
+    { taux: 20, id: 2 },
+]
 
 export const DEFAULT_SHORTCUTS: ShortcutMap = {
     reload: 'F5',
@@ -144,6 +190,20 @@ const DEFAULTS: AppSettings = {
         thankYouLine1: 'Merci !',
         thankYouLine2: 'A bientot :)',
         thankYouDurationSec: 5,
+    },
+    balance: {
+        enabled: false,
+        exportFolder: null,
+        fileName: 'Articles.txt',
+        defaultType: 2,
+        priceDecimals: 3,
+        nameMaxLength: 30,
+        tvaMap: [...DEFAULT_BALANCE_TVA_MAP],
+        defaultTvaId: 1,
+        refreshIntervalMin: 5,
+        webhookPort: 9110,
+        apiKey: '',
+        rgiPath: '',
     },
     print: {
         enabled: true,
@@ -290,6 +350,39 @@ export function normalizeCustomerDisplay(value: Partial<CustomerDisplaySettings>
     }
 }
 
+export function normalizeBalance(value: Partial<BalanceSettings> | undefined): BalanceSettings {
+    const raw = value as Record<string, unknown> | undefined
+
+    let tvaMap: BalanceTvaMapping[] = DEFAULT_BALANCE_TVA_MAP
+    if (Array.isArray(raw?.tvaMap)) {
+        const cleaned = (raw!.tvaMap as Array<Partial<BalanceTvaMapping>>)
+            .map((m) => ({ taux: Number(m?.taux), id: Number(m?.id) }))
+            .filter((m) => Number.isFinite(m.taux) && Number.isInteger(m.id) && m.id >= 0)
+        if (cleaned.length > 0) tvaMap = cleaned
+    }
+
+    const fileNameRaw = typeof raw?.fileName === 'string' ? raw.fileName.trim() : ''
+    // Empêche tout séparateur de chemin dans le nom de fichier
+    const fileName = fileNameRaw && !/[\\/]/.test(fileNameRaw) ? fileNameRaw.slice(0, 128) : 'Articles.txt'
+
+    return {
+        enabled: raw?.enabled === true,
+        exportFolder: typeof raw?.exportFolder === 'string' && raw.exportFolder.trim()
+            ? raw.exportFolder.trim()
+            : null,
+        fileName,
+        defaultType: raw?.defaultType === 1 ? 1 : 2,
+        priceDecimals: clampInt(raw?.priceDecimals, 0, 3, 3),
+        nameMaxLength: clampInt(raw?.nameMaxLength, 1, 30, 30),
+        tvaMap,
+        defaultTvaId: clampInt(raw?.defaultTvaId, 0, 99, 1),
+        refreshIntervalMin: clampInt(raw?.refreshIntervalMin, 0, 1440, 5),
+        webhookPort: clampInt(raw?.webhookPort, 0, 65535, 9110),
+        apiKey: typeof raw?.apiKey === 'string' ? raw.apiKey.trim().slice(0, 128) : '',
+        rgiPath: typeof raw?.rgiPath === 'string' ? raw.rgiPath.trim().slice(0, 512) : '',
+    }
+}
+
 function mergeWithDefaults(parsed: Partial<AppSettings> & { secondScreen?: unknown }): AppSettings {
     const { secondScreen: _legacySecondScreen, ...rest } = parsed
     const rawMediaFolder = rest.secondDisplayMediaFolder
@@ -304,6 +397,7 @@ function mergeWithDefaults(parsed: Partial<AppSettings> & { secondScreen?: unkno
         shortcuts: { ...DEFAULT_SHORTCUTS, ...(rest.shortcuts ?? {}) },
         print: normalizePrintSettings(rest.print),
         customerDisplay: normalizeCustomerDisplay(rest.customerDisplay),
+        balance: normalizeBalance(rest.balance),
     }
 }
 
@@ -349,6 +443,13 @@ export function setCustomerDisplaySettings(cd: Partial<CustomerDisplaySettings>)
     return updateSettings((current) => ({
         ...current,
         customerDisplay: normalizeCustomerDisplay({ ...current.customerDisplay, ...cd }),
+    }))
+}
+
+export function setBalanceSettings(balance: Partial<BalanceSettings>): AppSettings {
+    return updateSettings((current) => ({
+        ...current,
+        balance: normalizeBalance({ ...current.balance, ...balance }),
     }))
 }
 

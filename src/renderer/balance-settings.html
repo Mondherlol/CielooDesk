@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Balance - CielooPos</title>
+  <script type="module" src="/src/balance-settings.ts"></script>
+  <style>
+    .bal-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px 18px; }
+    .bal-field { display:flex; flex-direction:column; gap:4px; }
+    .bal-field.full { grid-column:1 / -1; }
+    .bal-field label { font-size:12px; font-weight:600; color:#475569; }
+    .bal-field input, .bal-field select {
+      padding:7px 9px; border:1px solid #cbd5e1; border-radius:7px; font-size:13px; background:#fff;
+    }
+    .bal-folder-row { display:flex; gap:8px; }
+    .bal-folder-row input { flex:1; }
+    .bal-tva-table { width:100%; border-collapse:collapse; margin-top:6px; }
+    .bal-tva-table th, .bal-tva-table td { text-align:left; padding:4px 6px; font-size:12px; }
+    .bal-tva-table input { width:90px; padding:5px 7px; border:1px solid #cbd5e1; border-radius:6px; }
+    .bal-row-del { border:none; background:#fee2e2; color:#b91c1c; border-radius:6px; cursor:pointer; padding:4px 9px; }
+    .bal-status { font-size:12.5px; padding:8px 10px; border-radius:7px; margin-top:8px; }
+    .bal-status.ok { background:#dcfce7; color:#166534; }
+    .bal-status.err { background:#fee2e2; color:#b91c1c; }
+    .bal-status.info { background:#e0f2fe; color:#075985; }
+    .bal-preview { width:100%; max-height:200px; overflow:auto; background:#0f172a; color:#e2e8f0;
+      font-family:Consolas,monospace; font-size:11.5px; padding:10px; border-radius:8px; white-space:pre; }
+    .bal-prod-count { font-size:12px; color:#64748b; margin:6px 0; }
+    .bal-disabled { opacity:.5; pointer-events:none; }
+    .bal-actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .btn-primary { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:9px 16px; font-weight:600; cursor:pointer; font-size:13px; }
+    .btn-primary:disabled { opacity:.6; cursor:default; }
+    .btn-ghost { background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; border-radius:8px; padding:8px 13px; cursor:pointer; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div class="print-shell">
+    <header class="print-header">
+      <div class="print-header-left">
+        <h1>Balance</h1>
+        <p>Génère le fichier d'articles (Dibal / LinéoSoft) déposé pour RGI</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="p-section">
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="p-section-title">Activer le mode balance</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="bal-enabled" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div id="bal-body">
+        <div class="p-section">
+          <div class="p-section-title">Configuration</div>
+          <div class="bal-grid">
+            <div class="bal-field full">
+              <label for="bal-folder">Dossier surveillé par RGI</label>
+              <div class="bal-folder-row">
+                <input id="bal-folder" type="text" placeholder="C:\Joolan\Balance\plu" readonly />
+                <button id="bal-browse" class="btn-ghost">Parcourir…</button>
+              </div>
+            </div>
+            <div class="bal-field full">
+              <label for="bal-apikey">Token API Dolibarr (génération auto sans connexion)</label>
+              <input id="bal-apikey" type="text" placeholder="Clé API d'un utilisateur Dolibarr (recommandé)" autocomplete="off" />
+            </div>
+            <div class="bal-field">
+              <label for="bal-filename">Nom du fichier</label>
+              <input id="bal-filename" type="text" value="Articles.txt" />
+            </div>
+            <div class="bal-field">
+              <label for="bal-type">Type d'article</label>
+              <select id="bal-type">
+                <option value="2">Pesé / KG (2)</option>
+                <option value="1">Unité (1)</option>
+              </select>
+            </div>
+            <div class="bal-field">
+              <label for="bal-decimals">Décimales du prix</label>
+              <input id="bal-decimals" type="number" min="0" max="3" />
+            </div>
+            <div class="bal-field">
+              <label for="bal-namelen">Longueur max du libellé</label>
+              <input id="bal-namelen" type="number" min="1" max="30" />
+            </div>
+            <div class="bal-field">
+              <label for="bal-interval">Rafraîchissement auto (min, 0 = off)</label>
+              <input id="bal-interval" type="number" min="0" max="1440" />
+            </div>
+            <div class="bal-field">
+              <label for="bal-webhook">Port webhook (temps réel local, 0 = off)</label>
+              <input id="bal-webhook" type="number" min="0" max="65535" />
+            </div>
+          </div>
+        </div>
+
+        <div class="p-section">
+          <div class="p-section-title">Correspondance TVA → ID balance</div>
+          <table class="bal-tva-table">
+            <thead><tr><th>Taux TVA (%)</th><th>ID TVA balance</th><th></th></tr></thead>
+            <tbody id="bal-tva-rows"></tbody>
+          </table>
+          <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+            <button id="bal-tva-add" class="btn-ghost">+ Ajouter un taux</button>
+            <div class="bal-field" style="flex-direction:row; align-items:center; gap:6px;">
+              <label for="bal-default-tvaid" style="margin:0;">ID par défaut</label>
+              <input id="bal-default-tvaid" type="number" min="0" max="99" style="width:70px;" />
+            </div>
+          </div>
+        </div>
+
+        <div class="p-section">
+          <div class="p-section-title">Aperçu &amp; envoi</div>
+          <div class="bal-actions">
+            <button id="bal-generate" class="btn-primary">Télécharger articles</button>
+            <button id="bal-refresh-preview" class="btn-ghost">Rafraîchir l'aperçu</button>
+          </div>
+          <div id="bal-status" class="bal-status info" style="display:none;"></div>
+          <div id="bal-count" class="bal-prod-count"></div>
+          <pre id="bal-preview" class="bal-preview"></pre>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</body>
+</html>

@@ -1,8 +1,9 @@
 
 export { }
 
-import type { AppSettings, ShortcutMap, PrintSettings, PrinterConfig, CustomerDisplaySettings } from '../../../modules/settings/main'
+import type { AppSettings, ShortcutMap, PrintSettings, PrinterConfig, CustomerDisplaySettings, BalanceSettings } from '../../../modules/settings/main'
 import type { PrintServerStatus } from '../../../modules/print-server/main'
+import type { BalanceGenResult, BalancePreview } from '../../../modules/balance/main'
 import type { LocalDebugInfo } from '../../../modules/local-dolibarr/main'
 
 export type MultiprintSection = {
@@ -106,6 +107,16 @@ declare global {
             }
             multiprint: {
                 getSections: () => Promise<{ sections: MultiprintSection[] | null; error?: string }>
+            }
+            balance: {
+                getConfig: () => Promise<BalanceSettings>
+                saveConfig: (payload: Partial<BalanceSettings>) => Promise<BalanceSettings>
+                selectFolder: () => Promise<string | null>
+                generateNow: () => Promise<BalanceGenResult>
+                preview: () => Promise<BalancePreview>
+                getStatus: () => Promise<{ lastWrittenAt?: string; lastCount?: number }>
+                openSettings: () => Promise<void>
+                onStatusUpdated: (cb: (result: BalanceGenResult) => void) => void
             }
             local: {
                 getLoaderMode: () => Promise<'prod' | 'dev' | 'debug'>

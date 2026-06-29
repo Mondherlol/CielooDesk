@@ -1,5 +1,5 @@
 import './styles/settings.css'
-import { createIcons, Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2 } from 'lucide'
+import { createIcons, Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2, Scale } from 'lucide'
 import type { AppSettings, ShortcutMap } from '../../modules/settings/main'
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -220,7 +220,7 @@ async function refreshCredsStatus(): Promise<void> {
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function init(): Promise<void> {
-    createIcons({ icons: { Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2 } })
+    createIcons({ icons: { Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2, Scale } })
     initTabs()
     initAdvancedTabReveal()
 
@@ -244,6 +244,7 @@ async function init(): Promise<void> {
         // Démarrage
         ; (document.getElementById('toggle-startup') as HTMLInputElement).checked = settings.launchAtStartup
         ; (document.getElementById('toggle-require-printer') as HTMLInputElement).checked = settings.requirePrinter ?? false
+        ; (document.getElementById('toggle-balance') as HTMLInputElement).checked = settings.balance?.enabled ?? false
 
     // Options avancées
     ;(document.getElementById('toggle-free-instance') as HTMLInputElement).checked = config.freeInstance ?? false
@@ -291,6 +292,17 @@ async function init(): Promise<void> {
 
     document.getElementById('btn-open-second-display-settings')!.addEventListener('click', async () => {
         await window.cieloo.secondDisplay.openSettings()
+    })
+
+    // ── Balance ──────────────────────────────────────────────────────────────
+    document.getElementById('toggle-balance')!.addEventListener('change', async (e) => {
+        const v = (e.target as HTMLInputElement).checked
+        await window.cieloo.balance.saveConfig({ enabled: v })
+        toast(v ? 'Mode balance activé' : 'Mode balance désactivé')
+    })
+
+    document.getElementById('btn-open-balance-settings')!.addEventListener('click', async () => {
+        await window.cieloo.balance.openSettings()
     })
 
     document.getElementById('btn-clear-creds')!.addEventListener('click', async () => {

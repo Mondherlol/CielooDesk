@@ -33,6 +33,8 @@ export default defineConfig(({ mode }) => {
                     printSettings: resolve('src/renderer/print-settings.html'),
                     // Barcode printers settings window (label + A4 sheet)
                     barcodeSettings: resolve('src/renderer/barcode-settings.html'),
+                    // Balance (Dibal / LinéoSoft) settings window
+                    balanceSettings: resolve('src/renderer/balance-settings.html'),
                     // Second display settings window
                     secondDisplaySettings: resolve('src/renderer/second-display-settings.html'),
                     // Offline fallback page (shown when network fails during navigation)

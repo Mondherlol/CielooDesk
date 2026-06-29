@@ -35,6 +35,9 @@
     <button class="sidebar-item" data-tab="device">
       <i data-lucide="hard-drive" class="sidebar-item-icon"></i> Terminal
     </button>
+    <button class="sidebar-item" data-tab="balance">
+      <i data-lucide="scale" class="sidebar-item-icon"></i> Balance
+    </button>
     <button class="sidebar-item" id="sidebar-avancees" data-tab="avancees" style="display:none">
       <i data-lucide="settings-2" class="sidebar-item-icon"></i> Options Avancées
     </button>
@@ -232,6 +235,34 @@
             <span class="setting-desc">Adresse IP locale de ce terminal</span>
           </div>
           <input type="text" class="setting-input setting-input--readonly" id="input-ip" readonly />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Balance ─────────────────────────────────────────────────── -->
+    <div id="tab-balance" class="settings-tab">
+      <h2 class="tab-title">Balance</h2>
+
+      <div class="section">
+        <p class="section-title">Mode balance</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Activer le mode balance</span>
+            <span class="setting-desc">Génère les articles pour la balance (Dibal / LinéoSoft) et ajoute l'onglet « Balance » dans le menu Outils</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-balance" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Configuration de la balance</span>
+            <span class="setting-desc">Dossier d'export, correspondance TVA, aperçu et envoi des articles</span>
+          </div>
+          <button class="btn btn-default" id="btn-open-balance-settings">Ouvrir</button>
         </div>
       </div>
     </div>
