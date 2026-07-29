@@ -127,10 +127,34 @@ export interface BalanceSettings {
     rgiPath: string
 }
 
+/**
+ * Mode NACEF (fiscalisation tunisienne S-MDF).
+ * À l'activation, l'app :
+ *  1. ajoute des routes statiques persistantes vers les serveurs fiscaux via une
+ *     passerelle dédiée (élévation UAC ponctuelle, seulement si elles manquent) ;
+ *  2. démarre un proxy CORS local (127.0.0.1:proxyPort → proxyTarget) qui rend le
+ *     boîtier S-MDF lisible depuis la page Dolibarr cloud.
+ */
+export interface NacefSettings {
+    enabled: boolean
+    /** Port d'écoute du proxy CORS local (défaut 10007) */
+    proxyPort: number
+    /** Cible relayée par le proxy — le boîtier S-MDF (défaut http://localhost:10006) */
+    proxyTarget: string
+    /** Valeur de l'en-tête Access-Control-Allow-Origin ('*' ou un domaine précis) */
+    origin: string
+    /** Passerelle (next hop) des routes fiscales, ex. 192.168.1.253 */
+    gateway: string
+    /** IP publiques des serveurs fiscaux à router via la passerelle (masque /32) */
+    destinations: string[]
+}
+
 export interface AppSettings {
     autoLogin: boolean
     fullscreen: boolean
     launchAtStartup: boolean
+    /** Vérification des mises à jour au démarrage (le bouton Support reste toujours dispo) */
+    autoUpdateCheck: boolean
     secondDisplayAutoStart: boolean
     secondDisplayMediaFolder: string | null
     newWindowMode: NewWindowMode
@@ -139,10 +163,23 @@ export interface AppSettings {
     print: PrintSettings
     customerDisplay: CustomerDisplaySettings
     balance: BalanceSettings
+    nacef: NacefSettings
     requirePrinter: boolean
     serialNumber: string
     terminalName: string
     devMode: boolean
+}
+
+/** IPv4 stricte — indispensable : ces valeurs partent dans un PowerShell élevé (route add). */
+const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
+
+export const DEFAULT_NACEF: NacefSettings = {
+    enabled: false,
+    proxyPort: 10007,
+    proxyTarget: 'http://localhost:10006',
+    origin: '*',
+    gateway: '192.168.1.253',
+    destinations: ['196.203.237.115', '196.203.237.116'],
 }
 
 export const DEFAULT_BALANCE_TVA_MAP: BalanceTvaMapping[] = [
@@ -163,6 +200,7 @@ const DEFAULTS: AppSettings = {
     autoLogin: false,
     fullscreen: false,
     launchAtStartup: false,
+    autoUpdateCheck: true,
     secondDisplayAutoStart: true,
     secondDisplayMediaFolder: null,
     newWindowMode: 'main',
@@ -205,6 +243,7 @@ const DEFAULTS: AppSettings = {
         apiKey: '',
         rgiPath: '',
     },
+    nacef: { ...DEFAULT_NACEF, destinations: [...DEFAULT_NACEF.destinations] },
     print: {
         enabled: true,
         port: 9100,
@@ -383,6 +422,33 @@ export function normalizeBalance(value: Partial<BalanceSettings> | undefined): B
     }
 }
 
+export function normalizeNacef(value: Partial<NacefSettings> | undefined): NacefSettings {
+    const raw = value as Record<string, unknown> | undefined
+    const isIpv4 = (s: unknown): s is string => typeof s === 'string' && IPV4_RE.test(s.trim())
+
+    // Cible du proxy : doit être une URL http(s) valide, sinon on retombe sur le défaut.
+    let proxyTarget = typeof raw?.proxyTarget === 'string' ? raw.proxyTarget.trim() : ''
+    try {
+        const u = new URL(proxyTarget)
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') proxyTarget = ''
+    } catch { proxyTarget = '' }
+
+    const destinations = Array.isArray(raw?.destinations)
+        ? (raw!.destinations as unknown[]).map((d) => String(d).trim()).filter((d) => IPV4_RE.test(d))
+        : []
+
+    return {
+        enabled: raw?.enabled === true,
+        proxyPort: clampInt(raw?.proxyPort, 1, 65535, DEFAULT_NACEF.proxyPort),
+        proxyTarget: proxyTarget || DEFAULT_NACEF.proxyTarget,
+        origin: typeof raw?.origin === 'string' && raw.origin.trim()
+            ? raw.origin.trim().slice(0, 256)
+            : DEFAULT_NACEF.origin,
+        gateway: isIpv4(raw?.gateway) ? (raw!.gateway as string).trim() : DEFAULT_NACEF.gateway,
+        destinations: destinations.length > 0 ? destinations : [...DEFAULT_NACEF.destinations],
+    }
+}
+
 function mergeWithDefaults(parsed: Partial<AppSettings> & { secondScreen?: unknown }): AppSettings {
     const { secondScreen: _legacySecondScreen, ...rest } = parsed
     const rawMediaFolder = rest.secondDisplayMediaFolder
@@ -398,6 +464,7 @@ function mergeWithDefaults(parsed: Partial<AppSettings> & { secondScreen?: unkno
         print: normalizePrintSettings(rest.print),
         customerDisplay: normalizeCustomerDisplay(rest.customerDisplay),
         balance: normalizeBalance(rest.balance),
+        nacef: normalizeNacef(rest.nacef),
     }
 }
 
@@ -450,6 +517,13 @@ export function setBalanceSettings(balance: Partial<BalanceSettings>): AppSettin
     return updateSettings((current) => ({
         ...current,
         balance: normalizeBalance({ ...current.balance, ...balance }),
+    }))
+}
+
+export function setNacefSettings(nacef: Partial<NacefSettings>): AppSettings {
+    return updateSettings((current) => ({
+        ...current,
+        nacef: normalizeNacef({ ...current.nacef, ...nacef }),
     }))
 }
 
@@ -513,7 +587,7 @@ export function openSettingsWindow(isDev: boolean, rendererUrl?: string): void {
         height: 540,
         minWidth: 640,
         minHeight: 460,
-        title: 'Configuration — CielooPos',
+        title: 'Configuration — caisLà',
         backgroundColor: '#f2f3f5',
         show: false,
         icon,

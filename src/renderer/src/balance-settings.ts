@@ -54,7 +54,9 @@ function collectTva(): void {
 function collect(): Partial<BalanceSettings> {
     collectTva()
     return {
-        enabled: ($('bal-enabled') as HTMLInputElement).checked,
+        // Le mode balance s'active/désactive depuis les Paramètres généraux :
+        // on préserve ici la valeur courante sans l'exposer dans cette fenêtre.
+        enabled: current.enabled,
         fileName: ($('bal-filename') as HTMLInputElement).value.trim() || 'Articles.txt',
         defaultType: Number(($('bal-type') as HTMLSelectElement).value) === 1 ? 1 : 2,
         priceDecimals: Number(($('bal-decimals') as HTMLInputElement).value),
@@ -71,7 +73,6 @@ function collect(): Partial<BalanceSettings> {
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 async function save(): Promise<void> {
     current = await window.cieloo.balance.saveConfig(collect())
-    applyDisabledState()
 }
 function scheduleSave(delay = 400): void {
     if (saveTimer) clearTimeout(saveTimer)
@@ -79,11 +80,6 @@ function scheduleSave(delay = 400): void {
         saveTimer = null
         save().then(() => toast('Enregistré')).catch(() => toast('Échec de l\'enregistrement'))
     }, delay)
-}
-
-function applyDisabledState(): void {
-    const enabled = ($('bal-enabled') as HTMLInputElement).checked
-    $('bal-body').classList.toggle('bal-disabled', !enabled)
 }
 
 // ─── Status & preview ───────────────────────────────────────────────────────
@@ -123,7 +119,6 @@ async function generateNow(): Promise<void> {
 async function init(): Promise<void> {
     current = await window.cieloo.balance.getConfig()
 
-    ;($('bal-enabled') as HTMLInputElement).checked = current.enabled
     ;($('bal-folder') as HTMLInputElement).value = current.exportFolder ?? ''
     ;($('bal-filename') as HTMLInputElement).value = current.fileName
     ;($('bal-type') as HTMLSelectElement).value = String(current.defaultType)
@@ -134,9 +129,7 @@ async function init(): Promise<void> {
     ;($('bal-default-tvaid') as HTMLInputElement).value = String(current.defaultTvaId)
     ;($('bal-apikey') as HTMLInputElement).value = current.apiKey ?? ''
     renderTvaRows(current.tvaMap)
-    applyDisabledState()
 
-    $('bal-enabled').addEventListener('change', () => scheduleSave(0))
     ;['bal-filename', 'bal-type', 'bal-decimals', 'bal-namelen', 'bal-interval', 'bal-webhook', 'bal-default-tvaid', 'bal-apikey']
         .forEach((id) => {
             $(id).addEventListener('change', () => scheduleSave(0))

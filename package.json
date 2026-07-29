@@ -1,16 +1,19 @@
 {
   "name": "CielooPosv2",
-  "version": "0.2.0",
+  "version": "1.0.3",
   "description": "CielooPos desktop shell",
   "main": "out/main/index.js",
   "author": "Mondher",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "npm run build:pos-offline && electron-vite build",
+    "build:pos-offline": "npm --prefix pos-offline run build",
     "predist": "node scripts/pre-dist-clean.cjs",
     "dist": "node scripts/run-dist.cjs",
-    "release": "electron-vite build && electron-builder --publish always"
+    "predist:demo": "node scripts/pre-dist-clean.cjs",
+    "dist:demo": "node scripts/run-dist.cjs --demo",
+    "release": "npm run build:pos-offline && electron-vite build && electron-builder --publish always"
   },
   "dependencies": {
     "cors": "^2.8.5",

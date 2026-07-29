@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { initAutoLoginPreload } from '../modules/auto-login/preload'
-import type { AppSettings, PrintSettings, CustomerDisplaySettings, BalanceSettings } from '../modules/settings/main'
+import type { AppSettings, PrintSettings, CustomerDisplaySettings, BalanceSettings, NacefSettings } from '../modules/settings/main'
+import type { NacefStatus } from '../modules/nacef/main'
 import type { PrintServerStatus } from '../modules/print-server/main'
 import type { BalanceGenResult, BalancePreview } from '../modules/balance/main'
 import type { LocalDebugInfo } from '../modules/local-dolibarr/main'
@@ -19,6 +20,37 @@ type LocalPackInfoUI = {
     cloudError: string | null
 }
 
+// ─── Pont caisse de secours hors-ligne (SPA pos-offline) ─────────────────────
+// Exposé sous un nom dédié : la SPA ne connaît QUE ce contrat, qui sera aussi
+// implémenté par la WebView React Native côté mobile.
+
+contextBridge.exposeInMainWorld('cielooOffline', {
+    getSnapshot: (): Promise<unknown | null> =>
+        ipcRenderer.invoke('offline-pos:get-snapshot'),
+    getSnapshotMeta: (): Promise<unknown | null> =>
+        ipcRenderer.invoke('offline-pos:get-meta'),
+    getContext: (): Promise<{ terminalName: string | null; offlineSince: number | null }> =>
+        ipcRenderer.invoke('offline-pos:get-context'),
+    getImages: (): Promise<{ products: Record<string, string>; categories: Record<string, string> }> =>
+        ipcRenderer.invoke('offline-pos:get-images'),
+    refreshSnapshot: (): Promise<{ ok: boolean; error?: string }> =>
+        ipcRenderer.invoke('offline-pos:refresh-snapshot'),
+    returnOnline: (): Promise<void> =>
+        ipcRenderer.invoke('offline-pos:return-online'),
+    saveSale: (sale: unknown): Promise<{ ok: boolean; ref?: string; error?: string }> =>
+        ipcRenderer.invoke('offline-pos:save-sale', sale),
+    listSales: (): Promise<unknown[]> =>
+        ipcRenderer.invoke('offline-pos:list-sales'),
+    syncSale: (uuid: string): Promise<{ ok: boolean; ref?: string; error?: string }> =>
+        ipcRenderer.invoke('offline-pos:sync-sale', uuid),
+    printReceipt: (html: string): Promise<{ ok: boolean; error?: string }> =>
+        ipcRenderer.invoke('offline-pos:print-receipt', html),
+    saveCustomer: (input: { name: string; phone: string; email: string }): Promise<{ ok: boolean; customer?: unknown; error?: string }> =>
+        ipcRenderer.invoke('offline-pos:save-customer', input),
+    listCustomers: (): Promise<unknown[]> =>
+        ipcRenderer.invoke('offline-pos:list-customers'),
+})
+
 // ─── IPC Bridge ───────────────────────────────────────────────────────────────
 
 contextBridge.exposeInMainWorld('cieloo', {
@@ -28,6 +60,10 @@ contextBridge.exposeInMainWorld('cieloo', {
             ipcRenderer.invoke('config:get'),
         getBootstrapInstance: (): Promise<{ instance: string; source: 'clipboard' | 'exe' } | null> =>
             ipcRenderer.invoke('config:get-bootstrap-instance'),
+        isDemo: (): Promise<boolean> =>
+            ipcRenderer.invoke('config:is-demo'),
+        setup: (instance: string, mode: 'cloud' | 'local'): Promise<void> =>
+            ipcRenderer.invoke('config:setup', instance, mode),
         saveInstance: (instance: string): Promise<void> =>
             ipcRenderer.invoke('config:save-instance', instance),
         toggleFreeInstance: (): Promise<boolean> =>
@@ -136,6 +172,15 @@ contextBridge.exposeInMainWorld('cieloo', {
         },
     },
 
+    nacef: {
+        getConfig: (): Promise<NacefSettings> =>
+            ipcRenderer.invoke('nacef:get-config'),
+        getStatus: (): Promise<NacefStatus> =>
+            ipcRenderer.invoke('nacef:get-status'),
+        saveConfig: (payload: Partial<NacefSettings>): Promise<NacefSettings> =>
+            ipcRenderer.invoke('nacef:save-config', payload),
+    },
+
     tech: {
         getPortInfo: (): Promise<Array<{ port: number; pid: number | null; processName: string | null; listening: boolean }>> =>
             ipcRenderer.invoke('tech:get-port-info'),
@@ -194,6 +239,10 @@ contextBridge.exposeInMainWorld('cieloo', {
         onSetUrl: (cb: (url: string) => void) => {
             ipcRenderer.on('url-editor:set', (_e, url: string) => cb(url))
         },
+        duplicateDbSubmit: (instance: string): Promise<void> =>
+            ipcRenderer.invoke('dev:duplicate-db-submit', instance),
+        duplicateDbCancel: (): Promise<void> =>
+            ipcRenderer.invoke('dev:duplicate-db-cancel'),
     },
 
     device: {
@@ -1020,9 +1069,14 @@ async function injectSplash(): Promise<void> {
         activate('_sp_s2')
         setTimeout(() => {
             complete('_sp_s2')
-            // Step 3: shown, waits for updater result (timeout 8s)
+            // Step 3: shown, waits for updater result (timeout 8s).
+            // Si aucune vérification n'aura lieu (dev, ou réglage désactivé),
+            // on complète l'étape tout de suite au lieu d'attendre le timeout.
             activate('_sp_s3')
             checkTimer = setTimeout(() => onCheckResult(false), 8_000)
+            void ipcRenderer.invoke('updater:will-auto-check')
+                .then((willCheck: boolean) => { if (!willCheck) onCheckResult(false) })
+                .catch(() => onCheckResult(false))
         }, 600)
     }, 500)
 
@@ -1317,7 +1371,7 @@ function injectUpdateToast(): void {
             umIconWrap.className = 'ok'
             umIconWrap.innerHTML = SVG_CHECK_LG
             umTitle.textContent = 'Vous êtes à jour'
-            umSub.textContent = 'CielooPos est à jour.'
+            umSub.textContent = 'CaisLà est à jour.'
             const now = new Date()
             const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
             const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })

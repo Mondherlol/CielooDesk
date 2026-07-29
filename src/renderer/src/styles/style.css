@@ -316,3 +316,94 @@ body {
     color: var(--accent);
     font-weight: 600;
 }
+
+/* ─── Choix du mode (build de démonstration) ─────────────────────────────────── */
+
+.mode-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.mode-choice-sub {
+    font-size: 0.9rem;
+    color: var(--text-2);
+    text-align: center;
+}
+
+.mode-choice-sub strong {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.mode-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.mode-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 6px;
+    padding: 18px 14px;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.mode-card:hover:not(:disabled) {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px var(--accent-glow);
+}
+
+.mode-card:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.mode-emoji {
+    font-size: 1.7rem;
+    line-height: 1;
+}
+
+.mode-name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.mode-desc {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--muted);
+    line-height: 1.35;
+}
+
+.mode-back {
+    align-self: center;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 4px 8px;
+    transition: color 0.15s;
+}
+
+.mode-back:hover:not(:disabled) {
+    color: var(--accent);
+}
+
+.mode-back:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

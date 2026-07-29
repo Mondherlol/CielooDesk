@@ -1,9 +1,10 @@
 
 export { }
 
-import type { AppSettings, ShortcutMap, PrintSettings, PrinterConfig, CustomerDisplaySettings, BalanceSettings } from '../../../modules/settings/main'
+import type { AppSettings, ShortcutMap, PrintSettings, PrinterConfig, CustomerDisplaySettings, BalanceSettings, NacefSettings } from '../../../modules/settings/main'
 import type { PrintServerStatus } from '../../../modules/print-server/main'
 import type { BalanceGenResult, BalancePreview } from '../../../modules/balance/main'
+import type { NacefStatus } from '../../../modules/nacef/main'
 import type { LocalDebugInfo } from '../../../modules/local-dolibarr/main'
 
 export type MultiprintSection = {
@@ -34,6 +35,8 @@ declare global {
             config: {
                 get: () => Promise<{ instance?: string; freeInstance?: boolean }>
                 getBootstrapInstance: () => Promise<{ instance: string; source: 'clipboard' | 'exe' } | null>
+                isDemo: () => Promise<boolean>
+                setup: (instance: string, mode: 'cloud' | 'local') => Promise<void>
                 saveInstance: (instance: string) => Promise<void>
                 toggleFreeInstance: () => Promise<boolean>
                 clear: () => Promise<void>
@@ -101,6 +104,8 @@ declare global {
                 navigate: (url: string) => Promise<void>
                 closeUrlEditor: () => Promise<void>
                 onSetUrl: (cb: (url: string) => void) => void
+                duplicateDbSubmit: (instance: string) => Promise<void>
+                duplicateDbCancel: () => Promise<void>
             }
             device: {
                 getNetworkInfo: () => Promise<{ mac: string; ip: string }>
@@ -117,6 +122,11 @@ declare global {
                 getStatus: () => Promise<{ lastWrittenAt?: string; lastCount?: number }>
                 openSettings: () => Promise<void>
                 onStatusUpdated: (cb: (result: BalanceGenResult) => void) => void
+            }
+            nacef: {
+                getConfig: () => Promise<NacefSettings>
+                getStatus: () => Promise<NacefStatus>
+                saveConfig: (payload: Partial<NacefSettings>) => Promise<NacefSettings>
             }
             local: {
                 getLoaderMode: () => Promise<'prod' | 'dev' | 'debug'>

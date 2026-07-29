@@ -341,7 +341,25 @@ function logFile(name: string): fs.WriteStream {
     return fs.createWriteStream(path.join(rootDir(), name), { flags: 'a' })
 }
 
-async function startMariadb(port: number, rootPassword: string): Promise<void> {
+// Dernières lignes non vides d'un journal (diagnostic remonté dans les messages d'erreur).
+function tailLog(name: string, maxLines = 12): string {
+    try {
+        const lines = fs.readFileSync(path.join(rootDir(), name), 'utf-8')
+            .split(/\r?\n/)
+            .filter((l) => l.trim() !== '')
+        return lines.slice(-maxLines).join('\n')
+    } catch { return '' }
+}
+
+// Enrichit une erreur de démarrage avec la fin du journal concerné (la vraie cause y est).
+function enrichWithLog(err: Error, logName: string): Error {
+    const tail = tailLog(logName)
+    return tail ? new Error(`${err.message}\n\n— Journal (${logName}) —\n${tail}`) : err
+}
+
+// Initialise (si besoin) le datadir puis démarre mariadbd et attend qu'il accepte les
+// connexions. Toute erreur est enrichie de la fin du journal (cause réelle).
+async function initAndStartMariadb(port: number, rootPassword: string): Promise<void> {
     const freshInstall = !fs.existsSync(path.join(dataDir(), 'mysql'))
     fs.mkdirSync(dataDir(), { recursive: true })
 
@@ -350,36 +368,90 @@ async function startMariadb(port: number, rootPassword: string): Promise<void> {
         // directement le mot de passe root via --password (PAS --auth-root-* qui
         // est une option Linux). Les comptes root@localhost / root@127.0.0.1 sont
         // crees par defaut avec ce mot de passe.
-        await runToCompletion(mariadbInstallExe(), [
-            `--datadir=${dataDir()}`,
-            `--password=${rootPassword}`,
-            `--port=${port}`,
-        ], 'mariadb-install.log')
+        try {
+            await runToCompletion(mariadbInstallExe(), [
+                `--datadir=${dataDir()}`,
+                `--password=${rootPassword}`,
+                `--port=${port}`,
+            ], 'mariadb-install.log')
+        } catch (e) {
+            throw enrichWithLog(e as Error, 'mariadb-install.log')
+        }
     }
 
     const log = logFile('mariadbd.log')
-    mariadbProc = spawn(mariadbdExe(), [
+    const proc = spawn(mariadbdExe(), [
         '--no-defaults',
         `--datadir=${dataDir()}`,
         `--port=${port}`,
         '--bind-address=127.0.0.1',
         '--skip-name-resolve',
     ], { cwd: mariadbDir(), windowsHide: true })
-    mariadbProc.stdout?.pipe(log)
-    mariadbProc.stderr?.pipe(log)
-    mariadbProc.on('exit', () => { mariadbProc = null })
+    mariadbProc = proc
+    proc.stdout?.pipe(log)
+    proc.stderr?.pipe(log)
+    // Code de sortie mémorisé : si le process meurt AVANT d'accepter les connexions, on
+    // sait donner un message ciblé (DLL/runtime manquant) plutôt qu'un « timeout ».
+    let dbExit: number | null | undefined
+    proc.on('exit', (code) => { if (mariadbProc === proc) mariadbProc = null; dbExit = code })
 
-    await waitForDb(port)
+    try {
+        await waitForDb(port, 30_000, () => dbExit, { name: 'MariaDB', exe: mariadbdExe() })
+    } catch (e) {
+        throw enrichWithLog(e as Error, 'mariadbd.log')
+    }
+}
+
+async function startMariadb(port: number, rootPassword: string): Promise<void> {
+    try {
+        await initAndStartMariadb(port, rootPassword)
+    } catch (e) {
+        // Datadir potentiellement à moitié initialisé par une tentative précédente
+        // (ex. 1er essai sans runtime VC++). Tant que Dolibarr n'est pas installé, la base
+        // ne contient AUCUNE donnée réelle : on remet le datadir à zéro et on réessaie une
+        // fois proprement. (Si Dolibarr est déjà installé, on protège les données → on relance l'erreur.)
+        if (!isInstalled() && fs.existsSync(path.join(dataDir(), 'mysql'))) {
+            await fsp.rm(dataDir(), { recursive: true, force: true }).catch(() => { /* best-effort */ })
+            fs.mkdirSync(dataDir(), { recursive: true })
+            await initAndStartMariadb(port, rootPassword)
+        } else {
+            throw e
+        }
+    }
 
     // Prepare la base + l'utilisateur applicatif pour l'hote 127.0.0.1 (cf. note sur
     // provisionDatabase). Indispensable avant l'install Dolibarr (createuser=false).
     await provisionDatabase(port, rootPassword)
 }
 
-function waitForDb(port: number, timeoutMs = 30_000): Promise<void> {
+// Traduit un code de sortie « au démarrage » de php.exe / mariadbd.exe en message clair.
+// Cause n°1 sur une caisse fraîche : runtime Visual C++ (x64) absent → l'exe ne se lance pas.
+function describeStartupFailure(name: string, exe: string, code: number | null | undefined): string {
+    // 0xC0000135 STATUS_DLL_NOT_FOUND : DLL système manquante (quasi toujours le runtime Visual C++).
+    if (code === 3221225781 || code === -1073741515) {
+        return `${name} n'a pas pu démarrer : il manque le runtime « Microsoft Visual C++ `
+            + `Redistributable (x64) » sur ce poste. Installez-le (vc_redist.x64.exe), puis relancez.`
+    }
+    // 0xC0000142 : échec d'initialisation d'une DLL (même cause probable, ou antivirus).
+    if (code === 3221225794 || code === -1073741502) {
+        return `${name} n'a pas pu s'initialiser (code ${code}). Vérifiez le runtime Visual C++ (x64) `
+            + `et qu'aucun antivirus ne bloque ${path.basename(exe)}.`
+    }
+    return `${name} s'est arrêté au démarrage (code ${code ?? 'inconnu'}). `
+        + `Voir les journaux dans le dossier local (menu Dev → « Ouvrir dossiers locaux »).`
+}
+
+function waitForDb(
+    port: number,
+    timeoutMs = 30_000,
+    isDead?: () => number | null | undefined,
+    deadInfo?: { name: string; exe: string },
+): Promise<void> {
     const start = Date.now()
     return new Promise((resolve, reject) => {
         const tick = (): void => {
+            const code = isDead?.()
+            if (code !== undefined) { reject(new Error(describeStartupFailure(deadInfo!.name, deadInfo!.exe, code))); return }
             const sock = netModule.connect({ host: '127.0.0.1', port }, () => { sock.destroy(); resolve() })
             sock.on('error', () => {
                 sock.destroy()
@@ -469,12 +541,22 @@ function writeRuntimeIni(): string {
     const ini = path.join(rootDir(), 'php.runtime.ini')
     const baseIni = path.join(phpDir(), 'php.ini')
     const extDir = path.join(phpDir(), 'ext').replace(/\\/g, '/')
+    const errorLog = path.join(rootDir(), 'php-errors.log').replace(/\\/g, '/')
     const content = `[PHP]
 ; herite du php.ini du pack puis surcharge les chemins inscriptibles
 extension_dir = "${extDir}"
 session.save_path = "${sess.replace(/\\/g, '/')}"
 sys_temp_dir = "${tmpDir().replace(/\\/g, '/')}"
 upload_tmp_dir = "${tmpDir().replace(/\\/g, '/')}"
+; Journalise les fatals PHP (pages blanches) dans un fichier consultable — sans les
+; afficher à l'écran (le POS reste propre en démo). Voir « Ouvrir dossiers locaux ».
+log_errors = On
+error_log = "${errorLog}"
+; Bufferise la sortie comme l'hébergement cloud (Infomaniak = 4096). Sans ça, un BOM
+; UTF-8 en tête d'un .php (ex. custom/cieloopos/index.php) envoie les entêtes trop tôt
+; → « headers already sent » → Dolibarr vide sa sortie → page blanche. Avec le buffer,
+; header()/session_start() passent et la page s'affiche (comme en prod).
+output_buffering = 4096
 `
     // On concatene le php.ini du pack pour garder les extensions activees.
     const packIni = fs.existsSync(baseIni) ? fs.readFileSync(baseIni, 'utf-8') : ''
@@ -484,22 +566,33 @@ upload_tmp_dir = "${tmpDir().replace(/\\/g, '/')}"
 
 async function startPhp(phpPort: number, iniPath: string): Promise<void> {
     const log = logFile('php.log')
-    phpProc = spawn(phpExe(), [
+    const proc = spawn(phpExe(), [
         '-c', iniPath,
         '-S', `127.0.0.1:${phpPort}`,
         '-t', htdocsDir(),
     ], { cwd: htdocsDir(), windowsHide: true })
-    phpProc.stdout?.pipe(log)
-    phpProc.stderr?.pipe(log)
-    phpProc.on('exit', () => { phpProc = null })
+    phpProc = proc
+    proc.stdout?.pipe(log)
+    proc.stderr?.pipe(log)
+    // Code de sortie mémorisé : si php.exe meurt avant de répondre (DLL/runtime manquant),
+    // on lève un message ciblé au lieu d'un « timeout » générique.
+    let phpExit: number | null | undefined
+    proc.on('exit', (code) => { if (phpProc === proc) phpProc = null; phpExit = code })
 
-    await waitForHttp(`http://127.0.0.1:${phpPort}/`)
+    await waitForHttp(`http://127.0.0.1:${phpPort}/`, 30_000, () => phpExit, { name: 'PHP', exe: phpExe() })
 }
 
-function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
+function waitForHttp(
+    url: string,
+    timeoutMs = 30_000,
+    isDead?: () => number | null | undefined,
+    deadInfo?: { name: string; exe: string },
+): Promise<void> {
     const start = Date.now()
     return new Promise((resolve, reject) => {
         const tick = (): void => {
+            const code = isDead?.()
+            if (code !== undefined) { reject(new Error(describeStartupFailure(deadInfo!.name, deadInfo!.exe, code))); return }
             const req = http.get(url, (res) => { res.resume(); resolve() })
             req.on('error', () => {
                 if (Date.now() - start > timeoutMs) reject(new Error('PHP ne repond pas (timeout).'))
@@ -666,6 +759,69 @@ export function getLocalStatus(): LocalStatus {
 export function getLocalBaseUrl(): string | null {
     const st = readState()
     return st.phpPort ? `http://127.0.0.1:${st.phpPort}` : null
+}
+
+// Dossiers de l'installation locale (pour le bouton Dev « Ouvrir dossiers locaux »).
+export function getLocalRootDir(): string { return rootDir() }
+export function getLocalFolders(): { root: string; htdocs: string; documents: string; errorLog: string } {
+    return {
+        root: rootDir(),
+        htdocs: htdocsDir(),
+        documents: documentsDir(),
+        errorLog: path.join(rootDir(), 'php-errors.log'),
+    }
+}
+
+type ImportProgressFn = (info: { phase: string; message?: string }) => void
+
+// Fusionne un arbre de fichiers dans `dest` (copie par-dessus, ne supprime rien) via
+// robocopy. `excludeDir` (chemin absolu) est ignoré côté source. robocopy renvoie un
+// code < 8 en cas de succès (0 = rien à copier, 1-7 = fichiers copiés/extra).
+function robocopyMerge(src: string, dest: string, excludeDir?: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const args = [src, dest, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/R:1', '/W:1']
+        if (excludeDir) args.push('/XD', excludeDir)
+        const proc = spawn('robocopy', args, { windowsHide: true })
+        let err = ''
+        proc.stderr.on('data', (d) => { err += d.toString() })
+        proc.on('error', reject)
+        proc.on('exit', (code) => {
+            if (code !== null && code < 8) resolve()
+            else reject(new Error(`robocopy a échoué (${code}): ${err}`))
+        })
+    })
+}
+
+// Importe une archive (zip) contenant TOUT le site cloud (arborescence relative à la
+// racine htdocs, avec `documents/…` pour le data_root) PAR-DESSUS l'install locale :
+//  - tout sauf `documents/` → htdocs local (modules, core, custom, images htdocs…),
+//  - `documents/…`          → dossier documents local (images produits, logos, médias).
+// Fusion : on écrase/ajoute, on ne supprime rien. Les fichiers d'environnement
+// (conf.php, .htaccess, install.lock…) sont déjà exclus côté serveur.
+export async function importSiteArchive(archivePath: string, onProgress?: ImportProgressFn): Promise<void> {
+    const staging = path.join(rootDir(), `ftp-staging-${Date.now()}`)
+    fs.mkdirSync(staging, { recursive: true })
+    try {
+        onProgress?.({ phase: 'sync-files', message: 'Extraction des fichiers…' })
+        await extractZip(archivePath, staging)
+
+        const htdocs = htdocsDir()
+        const documents = documentsDir()
+        fs.mkdirSync(htdocs, { recursive: true })
+        fs.mkdirSync(documents, { recursive: true })
+
+        const stagingDocs = path.join(staging, 'documents')
+
+        onProgress?.({ phase: 'sync-files', message: 'Copie du site (htdocs, modules…)…' })
+        await robocopyMerge(staging, htdocs, stagingDocs)   // htdocs = tout sauf documents/
+
+        if (fs.existsSync(stagingDocs)) {
+            onProgress?.({ phase: 'sync-files', message: 'Copie des documents (images…)…' })
+            await robocopyMerge(stagingDocs, documents)
+        }
+    } finally {
+        await fsp.rm(staging, { recursive: true, force: true }).catch(() => { /* nettoyage best-effort */ })
+    }
 }
 
 // ─── Synchro Cloud → Local : etat + import SQL ───────────────────────────────

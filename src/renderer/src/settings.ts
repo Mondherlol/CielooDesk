@@ -1,5 +1,5 @@
 import './styles/settings.css'
-import { createIcons, Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2, Scale } from 'lucide'
+import { createIcons, Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2, Scale, ShieldCheck } from 'lucide'
 import type { AppSettings, ShortcutMap } from '../../modules/settings/main'
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -200,6 +200,82 @@ function renderShortcuts(shortcuts: ShortcutMap, isDev: boolean): void {
         })
 }
 
+// ─── NACEF status + routes ────────────────────────────────────────────────────
+
+const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
+
+/** (Re)construit la liste éditable des destinations. */
+function renderNacefDestinations(destinations: string[]): void {
+    const list = document.getElementById('nacef-dest-list')!
+    list.innerHTML = ''
+    const rows = destinations.length > 0 ? destinations : ['']
+    rows.forEach((ip) => addNacefDestRow(ip))
+}
+
+function addNacefDestRow(value = ''): void {
+    const list = document.getElementById('nacef-dest-list')!
+
+    const row = document.createElement('div')
+    row.className = 'nacef-dest-row'
+
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.className = 'setting-input'
+    input.placeholder = 'Ex. 196.203.237.115'
+    input.spellcheck = false
+    input.value = value
+
+    const remove = document.createElement('button')
+    remove.type = 'button'
+    remove.className = 'nacef-dest-remove'
+    remove.title = 'Supprimer'
+    remove.textContent = '✕'
+    remove.addEventListener('click', () => {
+        row.remove()
+        // Toujours garder au moins une ligne visible pour pouvoir en ressaisir une.
+        if (!list.querySelector('.nacef-dest-row')) addNacefDestRow()
+    })
+
+    row.appendChild(input)
+    row.appendChild(remove)
+    list.appendChild(row)
+}
+
+/** IP saisies (non vides, dédupliquées, dans l'ordre). */
+function collectNacefDestinations(): string[] {
+    const inputs = document.querySelectorAll<HTMLInputElement>('#nacef-dest-list .setting-input')
+    const seen = new Set<string>()
+    const out: string[] = []
+    inputs.forEach((el) => {
+        const v = el.value.trim()
+        if (v && !seen.has(v)) { seen.add(v); out.push(v) }
+    })
+    return out
+}
+
+async function refreshNacefStatus(): Promise<void> {
+    const section = document.getElementById('nacef-status-section')!
+    const status = await window.cieloo.nacef.getStatus()
+
+    // La section « État » n'a de sens que si le mode est activé.
+    section.style.display = status.enabled ? '' : 'none'
+    if (!status.enabled) return
+
+    const proxyPill = document.getElementById('nacef-proxy-pill')!
+    const proxyDesc = document.getElementById('nacef-proxy-desc')!
+    proxyPill.textContent = status.proxyRunning ? 'Actif' : 'Arrêté'
+    proxyPill.className = `status-pill ${status.proxyRunning ? 'ok' : 'ko'}`
+    proxyDesc.textContent = `127.0.0.1:${status.port} → ${status.target}`
+
+    const routesPill = document.getElementById('nacef-routes-pill')!
+    const routesDesc = document.getElementById('nacef-routes-desc')!
+    routesPill.textContent = status.routesPresent ? 'En place' : 'Manquantes'
+    routesPill.className = `status-pill ${status.routesPresent ? 'ok' : 'ko'}`
+    routesDesc.textContent = status.routesPresent
+        ? `${status.destinations.join(', ')} via ${status.gateway}`
+        : `À ajouter : ${status.missingRoutes.join(', ')} via ${status.gateway}`
+}
+
 // ─── Credentials status ───────────────────────────────────────────────────────
 
 async function refreshCredsStatus(): Promise<void> {
@@ -220,7 +296,7 @@ async function refreshCredsStatus(): Promise<void> {
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function init(): Promise<void> {
-    createIcons({ icons: { Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2, Scale } })
+    createIcons({ icons: { Palette, KeyRound, Rocket, Keyboard, HardDrive, Settings2, Scale, ShieldCheck } })
     initTabs()
     initAdvancedTabReveal()
 
@@ -243,8 +319,14 @@ async function init(): Promise<void> {
 
         // Démarrage
         ; (document.getElementById('toggle-startup') as HTMLInputElement).checked = settings.launchAtStartup
+        ; (document.getElementById('toggle-auto-update') as HTMLInputElement).checked = settings.autoUpdateCheck ?? true
         ; (document.getElementById('toggle-require-printer') as HTMLInputElement).checked = settings.requirePrinter ?? false
         ; (document.getElementById('toggle-balance') as HTMLInputElement).checked = settings.balance?.enabled ?? false
+        ; (document.getElementById('toggle-nacef') as HTMLInputElement).checked = settings.nacef?.enabled ?? false
+        ; (document.getElementById('nacef-proxy-target') as HTMLInputElement).value = settings.nacef?.proxyTarget ?? ''
+        ; (document.getElementById('nacef-gateway') as HTMLInputElement).value = settings.nacef?.gateway ?? ''
+    renderNacefDestinations(settings.nacef?.destinations ?? [])
+    await refreshNacefStatus()
 
     // Options avancées
     ;(document.getElementById('toggle-free-instance') as HTMLInputElement).checked = config.freeInstance ?? false
@@ -273,6 +355,7 @@ async function init(): Promise<void> {
     wireToggle('toggle-fullscreen', 'fullscreen', 'Plein écran')
     wireToggle('toggle-autologin', 'autoLogin', 'Connexion automatique')
     wireToggle('toggle-startup', 'launchAtStartup', 'Démarrage automatique')
+    wireToggle('toggle-auto-update', 'autoUpdateCheck', 'Vérification auto des mises à jour')
     wireToggle('toggle-require-printer', 'requirePrinter', 'Imprimante obligatoire')
     wireToggle('toggle-dev-mode', 'devMode', 'Mode dev')
 
@@ -303,6 +386,68 @@ async function init(): Promise<void> {
 
     document.getElementById('btn-open-balance-settings')!.addEventListener('click', async () => {
         await window.cieloo.balance.openSettings()
+    })
+
+    // ── NACEF ──────────────────────────────────────────────────────────────────
+    const nacefToggle = document.getElementById('toggle-nacef') as HTMLInputElement
+    nacefToggle.addEventListener('change', async () => {
+        const v = nacefToggle.checked
+        nacefToggle.disabled = true
+        try {
+            // À l'activation : ajoute les routes (UAC ponctuelle si besoin) + lance le proxy.
+            await window.cieloo.nacef.saveConfig({ enabled: v })
+            toast(v ? 'Mode NACEF activé' : 'Mode NACEF désactivé')
+            await refreshNacefStatus()
+        } finally {
+            nacefToggle.disabled = false
+        }
+    })
+
+    const saveTargetBtn = document.getElementById('btn-nacef-save-target') as HTMLButtonElement
+    saveTargetBtn.addEventListener('click', async () => {
+        const targetInput = document.getElementById('nacef-proxy-target') as HTMLInputElement
+        const proxyTarget = targetInput.value.trim()
+
+        let valid = false
+        try { valid = ['http:', 'https:'].includes(new URL(proxyTarget).protocol) } catch { valid = false }
+        if (!valid) { toast('Cible invalide (URL http(s) attendue)'); return }
+
+        saveTargetBtn.disabled = true
+        try {
+            const saved = await window.cieloo.nacef.saveConfig({ proxyTarget })
+            // Re-render depuis la valeur normalisée (reflète ce qui a réellement été retenu).
+            targetInput.value = saved.proxyTarget
+            toast('Cible du proxy enregistrée')
+            await refreshNacefStatus()
+        } finally {
+            saveTargetBtn.disabled = false
+        }
+    })
+
+    document.getElementById('btn-nacef-add-dest')!.addEventListener('click', () => addNacefDestRow())
+
+    const saveRoutesBtn = document.getElementById('btn-nacef-save-routes') as HTMLButtonElement
+    saveRoutesBtn.addEventListener('click', async () => {
+        const gateway = (document.getElementById('nacef-gateway') as HTMLInputElement).value.trim()
+        const destinations = collectNacefDestinations()
+
+        // Validation côté client (le main re-filtre de toute façon en IPv4 stricte).
+        if (!IPV4_RE.test(gateway)) { toast('Passerelle invalide (IPv4 attendue)'); return }
+        const bad = destinations.filter((d) => !IPV4_RE.test(d))
+        if (destinations.length === 0) { toast('Ajoutez au moins une destination'); return }
+        if (bad.length > 0) { toast(`Destination invalide : ${bad[0]}`); return }
+
+        saveRoutesBtn.disabled = true
+        try {
+            const saved = await window.cieloo.nacef.saveConfig({ gateway, destinations })
+            // Re-render depuis la valeur normalisée (reflète ce qui a réellement été retenu).
+            ;(document.getElementById('nacef-gateway') as HTMLInputElement).value = saved.gateway
+            renderNacefDestinations(saved.destinations)
+            toast('Routes enregistrées')
+            await refreshNacefStatus()
+        } finally {
+            saveRoutesBtn.disabled = false
+        }
     })
 
     document.getElementById('btn-clear-creds')!.addEventListener('click', async () => {

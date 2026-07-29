@@ -21,13 +21,16 @@ import {
     printBarcodeTestPage,
     type BarcodeTestMode,
 } from '../modules/print-server/main'
-import { startSecondScreen, syncSecondScreen } from '../modules/second-screen/main'
+import { startSecondScreen, syncSecondScreen, stopSecondScreen } from '../modules/second-screen/main'
 import { initAutoUpdater, registerUpdaterIpc } from '../modules/updater/main'
 import { registerCustomerDisplayIpc, pushIdleText } from '../modules/customer-display/main'
 import {
     registerBalanceIpc, startBalance, stopBalance, generateBalanceFile,
     launchDfsApp, isRgiRunning, selectRgiPath, type DfsApp,
 } from '../modules/balance/main'
+import {
+    registerNacefIpc, startNacefProxy, stopNacefProxy, ensureNacefRoutes,
+} from '../modules/nacef/main'
 import {
     ensurePack as ensureLocalPack,
     startLocal as startLocalDolibarr,
@@ -36,23 +39,167 @@ import {
     resetLocalConfig as resetLocalConfigDolibarr,
     isPackPresent as isLocalPackPresent,
     getLocalStatus,
+    getLocalBaseUrl,
+    getLocalFolders,
     getLocalDebugInfo,
     getDbAdminUrl,
     getSyncState,
 } from '../modules/local-dolibarr/main'
-import { runCloudSync, fetchLatestPack, type SyncDeps } from '../modules/cloud-sync/main'
+import {
+    runCloudSync,
+    fetchLatestPack,
+    seedLocalFromCloud,
+    syncSiteFilesFromCloud,
+    fetchSyncInfo,
+    isVersionCompatible,
+    EXPECTED_DOLIBARR_LABEL,
+    type SyncDeps,
+} from '../modules/cloud-sync/main'
+import {
+    fetchSnapshot as fetchOfflineSnapshot,
+    hasSnapshot as hasOfflineSnapshot,
+    readSnapshotMeta as readOfflineSnapshotMeta,
+    offlinePosIndexHtml,
+    isOfflinePosBundlePresent,
+    registerOfflinePosIpc,
+    startSnapshotAutoRefresh,
+    syncImages as syncOfflineImages,
+    clearMissMarkers as clearOfflineImageMissMarkers,
+    syncAllPendingSales as syncAllOfflinePendingSales,
+} from '../modules/offline-pos/main'
+import { startSessionCookiePersistence } from '../modules/session-persist/main'
 
 const isDev = !app.isPackaged
 
+// ─── Données partagées entre comptes Windows (machine-wide) ────────────────────
+//
+// PROBLÈME : app.getPath('userData') = %APPDATA%\CielooPosv2, PROPRE À CHAQUE compte
+// Windows. Un poste configuré sous le compte admin (config.json, réglages, caisse
+// locale) devenait « vierge » vu par un compte caissier non-admin → l'écran de
+// config d'instance réapparaissait à chaque connexion sous un autre compte.
+//
+// SOLUTION : rediriger userData vers C:\ProgramData\CielooPosv2, commun à TOUS les
+// comptes. L'installeur (perMachine) crée ce dossier et accorde aux Utilisateurs le
+// droit de modification (cf. build/installer.nsh). Migration one-shot depuis
+// l'ancien emplacement par-utilisateur pour ne pas reperdre une config existante.
+//
+// Doit s'exécuter AVANT tout accès à un chemin userData (donc ici, tout en haut).
+const SHARED_DATA_FOLDER = 'CielooPosv2'
+
+function useSharedUserData(): void {
+    if (process.platform !== 'win32') return
+    // En dev on reste sur %APPDATA% (aucun installeur pour poser l'ACL ProgramData).
+    // CIELOO_SHARED_DATA=1 force le comportement partagé pour tester la migration.
+    if (!app.isPackaged && process.env.CIELOO_SHARED_DATA !== '1') return
+    const programData = process.env.ProgramData ?? process.env.ALLUSERSPROFILE
+    if (!programData) return
+
+    const perUser = app.getPath('userData')                   // %APPDATA%\CielooPosv2
+    const shared = path.join(programData, SHARED_DATA_FOLDER)  // C:\ProgramData\CielooPosv2
+
+    try { fs.mkdirSync(shared, { recursive: true }) } catch { /* normalement créé par l'installeur */ }
+
+    // Migration one-shot : au 1er lancement après mise à jour, sous le compte qui
+    // détient la config (typiquement l'admin d'install), on recopie l'ancienne config
+    // par-utilisateur vers le dossier partagé. Les fichiers de config sont légers ; la
+    // caisse locale (potentiellement lourde) est DÉPLACÉE si possible plutôt que copiée.
+    try {
+        const sharedHasConfig = fs.existsSync(path.join(shared, 'config.json'))
+        const perUserHasConfig = fs.existsSync(path.join(perUser, 'config.json'))
+        if (!sharedHasConfig && perUserHasConfig) {
+            const oldLocal = path.join(perUser, 'cieloo-local')
+            fs.cpSync(perUser, shared, {
+                recursive: true,
+                errorOnExist: false,
+                force: false,
+                filter: (src) => src !== oldLocal,   // exclut la caisse locale de la copie
+            })
+            // Caisse locale : déplacement instantané si même volume, sinon la synchro
+            // cloud la reconstruira au prochain passage en mode local (best-effort).
+            const newLocal = path.join(shared, 'cieloo-local')
+            if (fs.existsSync(oldLocal) && !fs.existsSync(newLocal)) {
+                try { fs.renameSync(oldLocal, newLocal) } catch { /* volume différent → re-seed */ }
+            }
+        }
+    } catch { /* migration best-effort : ne doit jamais empêcher le démarrage */ }
+
+    app.setPath('userData', shared)
+}
+
+useSharedUserData()
+
+// ─── Instance unique (une seule caisse par machine) ───────────────────────────
+//
+// Double-clic répété sur le raccourci, lancement depuis un 2e compte Windows,
+// relance pendant que la caisse tourne… : une 2e instance entrerait en conflit sur
+// TOUT ce qui est machine-wide — ports du Dolibarr local, serveur d'impression
+// (9100), proxy NACEF, serveur de médias, et surtout la config + la caisse locale
+// partagées dans C:\ProgramData (cf. useSharedUserData ci-dessus).
+//
+// Le verrou est posé APRÈS useSharedUserData() : Chromium l'ancre sur le dossier
+// userData, il doit donc être définitif au moment de la demande.
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+if (!hasSingleInstanceLock) {
+    // 2e instance : on rend la main tout de suite. Le process déjà en place est
+    // réveillé via 'second-instance' et remet sa fenêtre au premier plan.
+    app.quit()
+} else {
+    app.on('second-instance', () => {
+        focusExistingInstance()
+    })
+}
+
+/** Remet la caisse déjà ouverte au premier plan (relance bloquée par le verrou). */
+function focusExistingInstance(): void {
+    const win = mainWindow && !mainWindow.isDestroyed()
+        ? mainWindow
+        : BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ?? null
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    if (!win.isVisible()) win.show()
+    win.moveTop()
+    win.focus()
+}
+
+// Build de démonstration : active le choix « Cloud / Local » au 1er lancement.
+// Injecté à la compilation via electron.vite (define process.env.DEMO_MODE).
+const IS_DEMO = process.env.DEMO_MODE === '1' || process.env.DEMO_MODE === 'true'
+
 // ─── RustDesk / Dashboard integration ────────────────────────────────────────
 
-const DASHBOARD_API_URL = process.env.DASHBOARD_API_URL ?? 'http://102.204.206.120'
+const DASHBOARD_API_URL = process.env.DASHBOARD_API_URL ?? 'https://monitoring.cieloo.io/'
 const TERMINAL_API_KEY = process.env.TERMINAL_API_KEY ?? 'CHANGE_ME'
 const RUSTDESK_CONFIG = process.env.RUSTDESK_CONFIG ?? ''
 const RUSTDESK_SERVER = process.env.RUSTDESK_SERVER ?? ''
 const RUSTDESK_KEY = process.env.RUSTDESK_KEY ?? ''
 
 let _rustdeskIdCache: string | null = null
+
+// PID des process RustDesk (tray/GUI) lancés PAR la caisse : on les termine à la
+// fermeture de l'app. Le service Windows RustDesk, lui, n'est jamais arrêté — c'est
+// lui qui permet la prise en main à distance quand la caisse est fermée.
+const rustdeskChildPids = new Set<number>()
+
+function spawnRustDeskTray(exePath: string): void {
+    const child = spawn(exePath, ['--tray'], { detached: true, stdio: 'ignore' })
+    if (child.pid !== undefined) {
+        const pid = child.pid
+        rustdeskChildPids.add(pid)
+        child.once('exit', () => rustdeskChildPids.delete(pid))
+    }
+    child.unref()
+}
+
+/** Termine le tray RustDesk lancé par la caisse (arbre de process complet). */
+function stopRustDeskTray(): Promise<void> {
+    const pids = [...rustdeskChildPids]
+    rustdeskChildPids.clear()
+    if (pids.length === 0) return Promise.resolve()
+    return Promise.all(pids.map((pid) => new Promise<void>((resolve) => {
+        exec(`taskkill /F /T /PID ${pid}`, { timeout: 4000 }, () => resolve())
+    }))).then(() => undefined)
+}
 
 function getRustDeskId(): string | null {
     if (_rustdeskIdCache) return _rustdeskIdCache
@@ -135,7 +282,7 @@ async function applyRustDeskConfig(): Promise<string> {
             exec('taskkill /F /IM rustdesk.exe /T', () => resolve())
         })
         await new Promise(resolve => setTimeout(resolve, 1500))
-        spawn(exePath, ['--tray'], { detached: true, stdio: 'ignore' }).unref()
+        spawnRustDeskTray(exePath)
     }
 
     return `Config écrite + RustDesk redémarré (${serviceInstalled ? 'service' : 'tray'})\nServeur: ${RUSTDESK_SERVER}\nexe: ${exePath}`
@@ -262,7 +409,7 @@ function ensureRustDeskRunning(): void {
         // Service déjà actif (code 1056) ou pas de droits : lance le tray comme fallback
         exec('tasklist /FI "IMAGENAME eq rustdesk.exe" /NH', (_e, stdout) => {
             if (stdout.toLowerCase().includes('rustdesk.exe')) return // déjà en cours
-            spawn(exePath, ['--tray'], { detached: true, stdio: 'ignore' }).unref()
+            spawnRustDeskTray(exePath)
         })
     })
 }
@@ -327,6 +474,10 @@ interface Config {
     localEnabled?: boolean        // l'utilisateur a accepte / le pack est installe
     localActive?: boolean         // on tourne actuellement sur la caisse locale
     localLoaderMode?: LoaderMode  // apparence de l'ecran de chargement local
+    fullLocal?: boolean           // caisse 100% locale : aucune synchro cloud, aucune instance requise
+    offlinePosActive?: boolean    // caisse de secours hors-ligne (SPA pos-offline) affichée
+    offlinePosSince?: number      // horodatage (ms) de la bascule hors-ligne — compteur affiché dans la SPA
+    offlinePosAutoSync?: boolean  // synchro auto des ventes locales au retour en ligne (désactivée par défaut)
 }
 
 type InstanceSource = 'clipboard' | 'exe'
@@ -514,6 +665,19 @@ const LOADING_OVERLAY_TOP_OFFSET = 52
 // full configured URL (trailing slash stripped) instead of just the origin.
 function resolveCielooBase(): string | null {
     const config = readConfig()
+
+    // En mode caisse locale, tout le POS vit sur le Dolibarr local : « Ouvrir caisse /
+    // minipos », le second écran, etc. doivent cibler le serveur local, jamais l'instance
+    // cloud. En Mode Full Local on ne retombe JAMAIS sur le cloud (caisse 100% locale) ;
+    // en bascule locale classique (miroir d'une instance), on tolère un repli cloud si le
+    // serveur local n'est pas (encore) démarré.
+    if (config.fullLocal === true) {
+        return isLocalPackPresent() ? getLocalBaseUrl() : null
+    }
+    if (config.localActive === true && isLocalPackPresent()) {
+        const localBase = getLocalBaseUrl()
+        if (localBase) return localBase
+    }
 
     if (config.instance && config.freeInstance) {
         try { return new URL(config.instance).href.replace(/\/+$/, '') } catch { return null }
@@ -813,6 +977,195 @@ function hideLoadingOverlay(): void {
     }, wait)
 }
 
+// ─── Toast (overlay flottant, remplace les dialog.showMessageBox non bloquants) ─
+// Même patron que l'overlay de chargement ci-dessus : une petite fenêtre
+// transparente/frameless posée sur mainWindow, qui flotte peu importe la page
+// affichée (POS cloud ou caisse hors-ligne). Sert pour la synchro du snapshot
+// et le téléchargement des images (avec barre de progression).
+
+let toastWindow: BrowserWindow | null = null
+let toastHideTimer: NodeJS.Timeout | null = null
+
+const TOAST_WIDTH = 360
+const TOAST_HEIGHT = 104
+const TOAST_MARGIN = 20
+
+interface ToastOptions {
+    kind: 'success' | 'error' | 'info'
+    title: string
+    message?: string
+    /** ms avant disparition auto ; 0 = reste affiché (toast de progression, à remplacer/fermer explicitement) */
+    duration?: number
+    /** 0-100 : affiche une fine barre de progression sous le message */
+    progress?: number
+}
+
+const TOAST_COLORS: Record<ToastOptions['kind'], { accent: string; soft: string }> = {
+    success: { accent: '#16a34a', soft: '#dcfce7' },
+    error: { accent: '#dc3545', soft: '#fee2e2' },
+    info: { accent: '#2563eb', soft: '#eff6ff' },
+}
+
+const TOAST_ICONS: Record<ToastOptions['kind'], string> = {
+    success: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    error: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    info: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.3" r="0.6" fill="currentColor"/></svg>',
+}
+
+function escToastHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function toastHtml(opts: ToastOptions): string {
+    const c = TOAST_COLORS[opts.kind]
+    const msgHtml = opts.message ? `<div class="msg">${escToastHtml(opts.message)}</div>` : ''
+    const pct = opts.progress !== undefined ? Math.max(0, Math.min(100, opts.progress)) : null
+    const barHtml = pct !== null
+        ? `<div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>`
+        : ''
+    return `<!doctype html><html><head><meta charset="UTF-8"><style>
+html,body{margin:0;padding:0;background:transparent;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.card{position:absolute;left:14px;right:14px;bottom:14px;display:flex;align-items:flex-start;gap:11px;
+    background:#fff;border-radius:14px;padding:13px 15px;
+    box-shadow:0 12px 28px rgba(15,23,42,.16),0 2px 8px rgba(15,23,42,.08);
+    border:1px solid #e2e8f0;border-left:4px solid ${c.accent};
+    animation:cieloo-toast-in .22s cubic-bezier(.2,.9,.3,1.2)}
+@keyframes cieloo-toast-in{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+.icon{flex-shrink:0;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${c.soft};color:${c.accent}}
+.body{flex:1;min-width:0}
+.title{font-size:13.5px;font-weight:800;color:#1e293b;line-height:1.3}
+.msg{font-size:12px;color:#64748b;margin-top:2px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.bar-track{margin-top:8px;height:5px;border-radius:999px;background:#eef2f7;overflow:hidden}
+.bar-fill{height:100%;border-radius:999px;background:${c.accent};transition:width .25s ease}
+</style></head><body>
+<div class="card">
+    <div class="icon">${TOAST_ICONS[opts.kind]}</div>
+    <div class="body"><div class="title">${escToastHtml(opts.title)}</div>${msgHtml}${barHtml}</div>
+</div>
+</body></html>`
+}
+
+function getToastPoint(bounds: Electron.Rectangle): { x: number; y: number } {
+    return {
+        x: bounds.x + bounds.width - TOAST_WIDTH - TOAST_MARGIN,
+        y: bounds.y + bounds.height - TOAST_HEIGHT - TOAST_MARGIN,
+    }
+}
+
+function ensureToastWindow(parent: BrowserWindow): BrowserWindow {
+    if (toastWindow && !toastWindow.isDestroyed()) return toastWindow
+
+    toastWindow = new BrowserWindow({
+        width: TOAST_WIDTH,
+        height: TOAST_HEIGHT,
+        show: false,
+        frame: false,
+        transparent: true,
+        resizable: false,
+        movable: false,
+        minimizable: false,
+        maximizable: false,
+        closable: false,
+        focusable: false,
+        skipTaskbar: true,
+        hasShadow: false,
+        alwaysOnTop: true,
+        parent,
+        webPreferences: {
+            sandbox: true,
+            contextIsolation: true,
+            nodeIntegration: false,
+            spellcheck: false,
+        }
+    })
+
+    toastWindow.setIgnoreMouseEvents(true, { forward: true })
+    toastWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    toastWindow.setAlwaysOnTop(true, 'screen-saver')
+    toastWindow.setMenuBarVisibility(false)
+    toastWindow.on('closed', () => { toastWindow = null })
+
+    return toastWindow
+}
+
+function syncToastBounds(): void {
+    if (!mainWindow || !toastWindow || toastWindow.isDestroyed()) return
+    const { x, y } = getToastPoint(mainWindow.getBounds())
+    toastWindow.setBounds({ x, y, width: TOAST_WIDTH, height: TOAST_HEIGHT })
+}
+
+function hideToastImmediate(): void {
+    if (toastHideTimer) { clearTimeout(toastHideTimer); toastHideTimer = null }
+    if (toastWindow && !toastWindow.isDestroyed()) toastWindow.hide()
+}
+
+/**
+ * Toast flottant non bloquant — remplace les dialog.showMessageBox pour les
+ * actions type synchro (résultat, progression). `duration: 0` le garde affiché
+ * (toast de progression) jusqu'au prochain showToast() ou hideToast().
+ */
+function showToast(opts: ToastOptions): void {
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return
+    const win = ensureToastWindow(mainWindow)
+    void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(toastHtml(opts))}`)
+    syncToastBounds()
+    if (!win.isVisible()) win.showInactive()
+    win.moveTop()
+
+    if (toastHideTimer) { clearTimeout(toastHideTimer); toastHideTimer = null }
+    const duration = opts.duration ?? (opts.kind === 'error' ? 5500 : 3500)
+    if (duration > 0) {
+        toastHideTimer = setTimeout(hideToastImmediate, duration)
+    }
+}
+
+// ─── Splash de transition (bascule caisse en ligne ↔ caisse locale) ─────────
+// Page plein écran chargée DANS mainWindow pendant la bascule : évite le gel
+// sur la dernière image affichée, et sert d'écran de progression pour la
+// synchro des ventes locales lors du retour en ligne.
+
+function transitionSplashHtml(title: string, subtitle: string): string {
+    return `<!doctype html><html><head><meta charset="UTF-8"><style>
+html,body{margin:0;padding:0;height:100%;background:#f5f8fa;overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    display:flex;align-items:center;justify-content:center}
+.card{display:flex;flex-direction:column;align-items:center;gap:16px;max-width:440px;padding:20px}
+.spin{width:50px;height:50px;border-radius:50%;border:4px solid #dbeafe;border-top-color:#2563eb;animation:cieloo-spin .8s linear infinite}
+@keyframes cieloo-spin{to{transform:rotate(360deg)}}
+.title{font-size:19px;font-weight:800;color:#1e293b;text-align:center;letter-spacing:-0.01em}
+.subtitle{font-size:13.5px;color:#64748b;text-align:center;line-height:1.5;min-height:20px}
+.bar-track{width:280px;height:6px;border-radius:999px;background:#e2e8f0;overflow:hidden;display:none}
+.bar-track.show{display:block}
+.bar-fill{height:100%;border-radius:999px;background:#2563eb;width:0%;transition:width .2s ease}
+</style></head><body>
+<div class="card">
+    <div class="spin"></div>
+    <div class="title">${escToastHtml(title)}</div>
+    <div class="subtitle" id="subtitle">${escToastHtml(subtitle)}</div>
+    <div class="bar-track" id="barTrack"><div class="bar-fill" id="barFill"></div></div>
+</div>
+</body></html>`
+}
+
+function showTransitionSplash(title: string, subtitle: string): void {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(transitionSplashHtml(title, subtitle))}`)
+}
+
+/** Met à jour le sous-titre / la barre de progression du splash déjà affiché. */
+function updateTransitionSplash(subtitle: string, pct: number | null): void {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const barJs = pct === null
+        ? "bt.classList.remove('show');"
+        : `bt.classList.add('show'); bf.style.width='${Math.max(0, Math.min(100, pct))}%';`
+    const js = `(function(){
+        var s=document.getElementById('subtitle'); if(s) s.textContent=${JSON.stringify(subtitle)};
+        var bt=document.getElementById('barTrack'), bf=document.getElementById('barFill');
+        if (bt && bf) { ${barJs} }
+    })();`
+    void mainWindow.webContents.executeJavaScript(js).catch(() => { /* page pas encore prête */ })
+}
+
 // ─── App icon ─────────────────────────────────────────────────────────────────
 
 function resolveAppIcon(): string {
@@ -981,7 +1334,7 @@ function buildMenu(): void {
         {
             label: 'Quitter',
             accelerator: sc.quit,
-            click: () => app.quit()
+            click: () => shutdownApp()
         }
     ]
 
@@ -1075,10 +1428,18 @@ function buildMenu(): void {
         }
     ]
 
-    // ── Onglet « Caisse Locale » : contenu dynamique selon l'etat d'installation ──
+    // ── Onglet « Caisse Locale » ──────────────────────────────────────────────
+    // Nouvelle caisse de secours hors-ligne (SPA pos-offline + snapshot JSON).
+    // L'ancien prototype Dolibarr local complet reste accessible dans un sous-menu.
     const localInstalled = isLocalPackPresent()
     const localActive = readConfig().localActive
-    const caisseLocaleSubmenu: Electron.MenuItemConstructorOptions[] = localInstalled
+    const offlinePosActive = readConfig().offlinePosActive === true
+    const offlineMeta = readOfflineSnapshotMeta()
+    const snapshotInfoLabel = offlineMeta
+        ? `Snapshot : ${offlineMeta.products} produits, ${offlineMeta.customers} clients (${new Date(offlineMeta.fetchedAt).toLocaleString('fr-FR')})`
+        : 'Snapshot : jamais téléchargé'
+
+    const legacyLocalSubmenu: Electron.MenuItemConstructorOptions[] = localInstalled
         ? [
             localActive
                 ? { label: 'Revenir au mode en ligne', click: () => void switchToCloud() }
@@ -1102,6 +1463,28 @@ function buildMenu(): void {
             { label: 'Config…', click: () => openLocalConfigWindow() }
         ]
 
+    const offlinePosConfigSubmenu: Electron.MenuItemConstructorOptions[] = [
+        {
+            label: 'Synchroniser les ventes au retour en ligne',
+            type: 'checkbox',
+            checked: readConfig().offlinePosAutoSync === true,
+            toolTip: 'Au retour en ligne, transmet automatiquement les ventes locales en attente (sinon, seul le bouton « Téléverser » du ticket les synchronise).',
+            click: () => void toggleOfflinePosAutoSync()
+        },
+    ]
+
+    const caisseLocaleSubmenu: Electron.MenuItemConstructorOptions[] = [
+        offlinePosActive
+            ? { label: 'Revenir en caisse en ligne', click: () => void returnFromOfflinePos() }
+            : { label: 'Basculer en caisse locale', click: () => void switchToOfflinePos() },
+        { label: 'Mettre à jour le snapshot', click: () => void refreshOfflineSnapshotNow() },
+        { label: 'Télécharger les images', click: () => void syncOfflineImagesNow() },
+        { label: snapshotInfoLabel, enabled: false },
+        { type: 'separator' },
+        { label: 'Config', submenu: offlinePosConfigSubmenu },
+        { label: 'Ancien prototype (Dolibarr local)', submenu: legacyLocalSubmenu },
+    ]
+
     const devSubmenu: Electron.MenuItemConstructorOptions[] = [
         {
             label: 'Effacer config',
@@ -1113,6 +1496,32 @@ function buildMenu(): void {
         {
             label: 'Passer en mode hors connexion',
             click: () => loadOfflinePage()
+        },
+        {
+            label: 'Mode Full Local',
+            type: 'checkbox',
+            checked: readConfig().fullLocal === true,
+            toolTip: 'Caisse 100% locale : Dolibarr local uniquement, sans instance Cieloo ni synchronisation cloud.',
+            click: () => void toggleFullLocal()
+        },
+        // En Full Local, on peut amorcer/écraser la base locale avec une copie d'une
+        // instance Cieloo choisie à la volée (pas d'instance fixe configurée).
+        ...(readConfig().fullLocal === true
+            ? [{
+                label: 'Dupliquer la base…',
+                toolTip: 'Copie la base d\'une instance Cieloo (.cieloo.io) dans la base locale.',
+                click: () => void duplicateBaseFromInstance()
+            }] as Electron.MenuItemConstructorOptions[]
+            : []),
+        {
+            label: 'Synchroniser FTP',
+            toolTip: 'Copie tous les fichiers du site cloud (modules, images, médias…) dans la caisse locale, via FTP. Ne touche ni la config locale ni la base.',
+            click: () => void syncFtpNow()
+        },
+        {
+            label: 'Ouvrir dossiers locaux',
+            toolTip: 'Ouvre dans l\'explorateur les dossiers de l\'installation Dolibarr locale (htdocs, documents, logs).',
+            click: () => void openLocalFolders()
         },
         { type: 'separator' },
         {
@@ -1177,8 +1586,12 @@ function buildMenu(): void {
         { label: 'Navigation', submenu: navigationSubmenu },
         { label: 'Affichage', submenu: affichageSubmenu },
         { label: 'Paramètres', submenu: paramsSubmenu },
-        { label: 'Caisse Locale', submenu: caisseLocaleSubmenu },
     ]
+
+    // « Caisse Locale » : fonction encore en test, réservée au mode dev.
+    if (isDev || loadSettings().devMode) {
+        menuTemplate.push({ label: 'Caisse Locale', submenu: caisseLocaleSubmenu })
+    }
 
     // « Balance » juste avant « Support », seulement si le mode est activé.
     if (loadSettings().balance.enabled) {
@@ -1487,6 +1900,179 @@ function openUrlEditorWindow(): void {
         void urlEditorWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/url-editor.html${query}`)
     } else {
         void urlEditorWindow.loadFile(path.join(__dirname, '../renderer/url-editor.html'), { search: query })
+    }
+}
+
+// ─── Dupliquer la base (menu Dev, Full Local) ────────────────────────────────
+// Petite fenetre qui demande l'instance Cieloo source (ex: acme.cieloo.io), puis
+// resout la promesse via IPC (submit) ou null (annulation / fermeture).
+let duplicateDbWindow: BrowserWindow | null = null
+let duplicateDbResolve: ((v: string | null) => void) | null = null
+
+function promptInstanceForDuplicate(): Promise<string | null> {
+    if (duplicateDbWindow && !duplicateDbWindow.isDestroyed()) {
+        duplicateDbWindow.focus()
+        return Promise.resolve(null)
+    }
+
+    return new Promise<string | null>((resolve) => {
+        duplicateDbResolve = resolve
+        const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined
+
+        duplicateDbWindow = new BrowserWindow({
+            width: 560,
+            height: 240,
+            useContentSize: true,
+            resizable: false,
+            minimizable: false,
+            maximizable: false,
+            icon: resolveAppIcon(),
+            title: 'Dupliquer la base — CielooPos',
+            backgroundColor: '#f8fafc',
+            show: false,
+            parent: parentWindow,
+            modal: true,
+            webPreferences: {
+                preload: path.join(__dirname, '../preload/index.js'),
+                contextIsolation: true,
+                sandbox: false,
+                nodeIntegration: false,
+            }
+        })
+
+        duplicateDbWindow.setMenu(null)
+        duplicateDbWindow.once('ready-to-show', () => {
+            duplicateDbWindow?.webContents
+                .executeJavaScript('Math.ceil(document.body.getBoundingClientRect().height)')
+                .then((h: number) => {
+                    if (duplicateDbWindow && !duplicateDbWindow.isDestroyed() && h > 0) {
+                        duplicateDbWindow.setContentSize(560, h)
+                    }
+                })
+                .catch(() => { /* garde la taille par defaut */ })
+            duplicateDbWindow?.show()
+        })
+        // Fermeture (croix / annulation) → on resout null si personne n'a deja repondu.
+        duplicateDbWindow.on('closed', () => {
+            duplicateDbWindow = null
+            if (duplicateDbResolve) { duplicateDbResolve(null); duplicateDbResolve = null }
+        })
+
+        if (isDev && process.env.ELECTRON_RENDERER_URL) {
+            void duplicateDbWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/duplicate-db.html`)
+        } else {
+            void duplicateDbWindow.loadFile(path.join(__dirname, '../renderer/duplicate-db.html'))
+        }
+    })
+}
+
+// Normalise la saisie utilisateur en hostname d'instance (acme.cieloo.io) :
+// enleve le protocole/chemin, et complete « acme » → « acme.cieloo.io ».
+function normalizeInstanceUrl(input: string): string | null {
+    let s = (input ?? '').trim()
+    if (!s) return null
+    s = s.replace(/^https?:\/\//i, '')     // sans protocole
+    s = s.split('/')[0].trim()             // sans chemin / query
+    s = s.replace(/\/+$/, '')
+    if (!s) return null
+    if (!s.includes('.')) s = `${s}.cieloo.io`  // nom court → domaine Cieloo
+    return s.toLowerCase()
+}
+
+// « Dupliquer la base… » (menu Dev, Full Local) : demande une instance Cieloo puis
+// remplace la base locale par une copie complete de celle du cloud (seed). C'est
+// destructif : la base locale actuelle est ecrasee.
+async function duplicateBaseFromInstance(): Promise<void> {
+    if (!mainWindow) return
+    if (readConfig().fullLocal !== true) return   // reserve au Mode Full Local
+    if (!isLocalPackPresent()) {
+        await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: 'Dupliquer la base',
+            message: 'La caisse locale n\'est pas installée.',
+            detail: 'Activez d\'abord le Mode Full Local pour installer la caisse locale.',
+        })
+        return
+    }
+
+    const raw = await promptInstanceForDuplicate()
+    if (raw === null) return                       // annulation
+    const instanceUrl = normalizeInstanceUrl(raw)
+    if (!instanceUrl) {
+        await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: 'Dupliquer la base',
+            message: 'Instance invalide.',
+            detail: 'Saisissez le lien de l\'instance, par exemple : acme.cieloo.io',
+        })
+        return
+    }
+
+    const confirm = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Dupliquer', 'Annuler'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'Dupliquer la base',
+        message: `Remplacer la base locale par une copie de ${instanceUrl} ?`,
+        detail: 'La base locale actuelle sera définitivement écrasée par les données de cette instance.',
+    })
+    if (confirm.response !== 0) return
+
+    await runDuplicateBase(instanceUrl)
+}
+
+// Cœur de la duplication (réutilisé par le menu Dev et par le setup « Mode Local ») :
+// (re)démarre le moteur local, refuse une version Dolibarr incompatible, remplace la base
+// locale par une copie complète du cloud (seed = base + fichiers du site), puis recharge
+// le POS. `instanceUrl` = hostname (acme.cieloo.io) ou URL d'une instance libre.
+// Renvoie true si la duplication a réussi.
+async function runDuplicateBase(instanceUrl: string): Promise<boolean> {
+    if (!mainWindow) return false
+
+    renderLocalShell(false, `Duplication depuis ${instanceUrl}`)
+    pushLocalProgress({ phase: 'sync-check', message: 'Préparation de la duplication…' })
+
+    const deps: SyncDeps = { dashboardUrl: DASHBOARD_API_URL, terminalKey: TERMINAL_API_KEY, instanceUrl }
+    let localUrl: string | null = null
+    try {
+        // Le moteur local doit tourner pour recréer/importer la base (idempotent).
+        localUrl = await startLocalDolibarr((info) => pushLocalProgress(info))
+
+        // Refuse une instance dont la version Dolibarr diffère de celle du pack local.
+        pushLocalProgress({ phase: 'sync-check', message: 'Vérification de l\'instance…' })
+        const info = await fetchSyncInfo(deps)
+        if (!isVersionCompatible(info.dolibarr_version)) {
+            const err = new Error(
+                `Cette instance est en Dolibarr ${info.dolibarr_version}. `
+                + `La caisse locale nécessite la version ${EXPECTED_DOLIBARR_LABEL}.`
+            ) as Error & { code?: string }
+            err.code = 'VERSION_MISMATCH'
+            throw err
+        }
+
+        await seedLocalFromCloud(deps, (info) => pushLocalProgress(info))
+
+        if (localUrl) await mainWindow.loadURL(localUrl)   // POS rechargé sur la base copiée
+        await dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            title: 'Dupliquer la base',
+            message: `Base dupliquée depuis ${instanceUrl}.`,
+            detail: 'La base locale est désormais une copie de cette instance.',
+        })
+        return true
+    } catch (err) {
+        const e = err as Error & { code?: string }
+        if (localUrl) await mainWindow.loadURL(localUrl).catch(() => { /* repli silencieux */ })
+        await dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Dupliquer la base',
+            message: e.code === 'VERSION_MISMATCH'
+                ? 'Cette instance n\'est pas compatible avec la caisse locale.'
+                : 'La duplication a échoué.',
+            detail: e.message,
+        })
+        return false
     }
 }
 
@@ -1965,6 +2551,9 @@ function currentInstanceUrl(): string | null {
 // Lance la synchro cloud→local pendant l'écran de chargement.
 // Renvoie true si le mode local a été BLOQUÉ (version incompatible) → l'appelant stoppe.
 async function syncLocalFromCloud(): Promise<boolean> {
+    // Mode Full Local : aucune synchronisation cloud, on démarre tel quel.
+    if (readConfig().fullLocal === true) return false
+
     const instanceUrl = currentInstanceUrl()
     if (!instanceUrl) {
         // Sans instance, aucune synchro possible : on refuse de démarrer sur une base
@@ -2090,29 +2679,6 @@ async function installLocalPack(activateAfter: boolean): Promise<boolean> {
     }
 }
 
-// Propose l'installation du mode local au tout premier lancement (une seule fois).
-async function offerLocalModeIfNeeded(): Promise<void> {
-    if (!mainWindow) return
-    const config = readConfig()
-    if (config.localOffered) return
-
-    const res = await dialog.showMessageBox(mainWindow, {
-        type: 'question',
-        buttons: ['Oui, installer la caisse locale', 'Non, plus tard'],
-        defaultId: 0,
-        cancelId: 1,
-        title: 'CaisLà — Mode caisse locale',
-        message: 'Installer aussi le mode caisse locale ?',
-        detail: 'Le mode local permet de continuer à encaisser même sans connexion Internet.\n'
-            + 'Un serveur Dolibarr/CielooPos sera installé et fonctionnera entièrement sur ce poste.\n\n'
-            + 'Téléchargement d\'environ 200 Mo. Vous pourrez aussi l\'installer plus tard via le menu.',
-    })
-    writeConfig({ ...readConfig(), localOffered: true })
-    if (res.response === 0) {
-        await installLocalPack(true)
-    }
-}
-
 // Bascule manuelle vers la caisse locale (installe le pack si absent).
 async function switchToLocal(): Promise<void> {
     if (!isLocalPackPresent()) {
@@ -2121,13 +2687,31 @@ async function switchToLocal(): Promise<void> {
     }
     // La caisse locale ne doit JAMAIS s'ouvrir sur un Dolibarr vierge : on exige
     // qu'une première synchronisation cloud→local ait déjà eu lieu.
-    if (!getSyncState().seeded) {
+    // Exception : en Mode Full Local, la base locale vierge EST le but recherché.
+    if (readConfig().fullLocal !== true && !getSyncState().seeded) {
         const proceed = await promptFirstSyncRequired()
         if (!proceed) return   // « Retour en ligne » → on reste sur le cloud
     }
     writeConfig({ ...readConfig(), localActive: true })
     buildMenu()
     await loadLocalContent()
+}
+
+// Bascule « Mode Full Local » (menu Dev) : caisse 100% locale, sans instance Cieloo
+// ni synchronisation cloud. À l'activation, on installe le pack au besoin et on
+// démarre directement le Dolibarr local. À la désactivation, on repasse en ligne.
+async function toggleFullLocal(): Promise<void> {
+    const enabling = readConfig().fullLocal !== true
+    if (enabling) {
+        writeConfig({ ...readConfig(), fullLocal: true })
+        buildMenu()
+        await switchToLocal()   // installe le pack si absent puis démarre en local
+    } else {
+        writeConfig({ ...readConfig(), fullLocal: false })
+        buildMenu()
+        await switchToCloud()
+    }
+    buildMenu()
 }
 
 // Aucune synchro n'a encore été faite : on prévient l'utilisateur et on lui laisse
@@ -2211,6 +2795,109 @@ async function syncLocalNow(): Promise<void> {
             detail: e.message,
         })
     }
+}
+
+// Action « Synchroniser FTP » (menu Dev) : rapatrie TOUT le site cloud (htdocs +
+// documents : modules, images, médias, fichiers remplacés par des modules…) par-dessus
+// l'install locale, via FTP. Ne touche NI la config locale (conf.php) NI la base — c'est
+// le complément « fichiers » de la synchro de base.
+async function syncFtpNow(): Promise<void> {
+    if (!mainWindow) return
+    if (!isLocalPackPresent()) {
+        await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: 'Synchroniser FTP',
+            message: 'La caisse locale n\'est pas installée.',
+            detail: 'Activez le Mode Full Local (ou installez la caisse locale) avant de synchroniser les fichiers.',
+        })
+        return
+    }
+
+    const instanceUrl = currentInstanceUrl()
+    if (!instanceUrl) {
+        await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: 'Synchroniser FTP',
+            message: 'Aucune instance Cieloo configurée.',
+            detail: 'Impossible de synchroniser les fichiers sans instance Cieloo.',
+        })
+        return
+    }
+
+    const confirm = await dialog.showMessageBox(mainWindow, {
+        type: 'question',
+        buttons: ['Synchroniser', 'Annuler'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'Synchroniser FTP',
+        message: `Copier tous les fichiers du site ${instanceUrl} en local ?`,
+        detail: 'Le site cloud (modules, images, médias…) sera copié par-dessus la caisse locale. '
+            + 'La configuration locale (conf.php) et la base de données ne sont pas touchées.',
+    })
+    if (confirm.response !== 0) return
+
+    const wasActive = Boolean(readConfig().localActive)
+    renderLocalShell(false, `Synchronisation FTP depuis ${instanceUrl}`)
+    pushLocalProgress({ phase: 'sync-files', message: 'Préparation de la synchronisation…' })
+
+    const deps: SyncDeps = { dashboardUrl: DASHBOARD_API_URL, terminalKey: TERMINAL_API_KEY, instanceUrl }
+    let localUrl: string | null = null
+    try {
+        // Le moteur local doit tourner pour recharger le POS à jour ensuite (idempotent).
+        localUrl = await startLocalDolibarr((info) => pushLocalProgress(info))
+        const ok = await syncSiteFilesFromCloud(deps, (info) => pushLocalProgress(info))
+
+        if (wasActive && localUrl) {
+            await mainWindow.loadURL(localUrl)          // on reste en local, POS rechargé
+        } else {
+            await stopLocalDolibarr()                    // on était en ligne → on recoupe le moteur
+            loadCloudContent()
+        }
+
+        await dialog.showMessageBox(mainWindow, {
+            type: ok ? 'info' : 'warning',
+            title: 'Synchroniser FTP',
+            message: ok
+                ? 'Fichiers du site synchronisés.'
+                : 'Aucun fichier n\'a été synchronisé.',
+            detail: ok
+                ? 'Les modules, images et médias du cloud ont été copiés dans la caisse locale.'
+                : 'Vérifiez que l\'instance et le FTP du dashboard sont accessibles.',
+        })
+    } catch (err) {
+        if (wasActive && localUrl) {
+            await mainWindow.loadURL(localUrl).catch(() => { /* repli silencieux */ })
+        } else {
+            await stopLocalDolibarr().catch(() => { /* déjà arrêté */ })
+            loadCloudContent()
+        }
+        await dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Synchroniser FTP',
+            message: 'La synchronisation FTP a échoué.',
+            detail: String((err as Error)?.message ?? err),
+        })
+    }
+}
+
+// Action « Ouvrir dossiers locaux » (menu Dev) : ouvre dans l'explorateur Windows la
+// racine de l'install locale (contient documents/, logs, php-errors.log, state.json) et
+// le htdocs Dolibarr (custom/, core/, conf/…), utiles pour diagnostiquer une page blanche.
+async function openLocalFolders(): Promise<void> {
+    if (!isLocalPackPresent()) {
+        if (mainWindow) {
+            await dialog.showMessageBox(mainWindow, {
+                type: 'warning',
+                title: 'Dossiers locaux',
+                message: 'La caisse locale n\'est pas installée.',
+                detail: 'Aucun dossier Dolibarr local à ouvrir pour le moment.',
+            })
+        }
+        return
+    }
+    const folders = getLocalFolders()
+    await shell.openPath(folders.root)
+    await shell.openPath(folders.htdocs)
 }
 
 // ─── Ecran de transition « retour en ligne » ────────────────────────────────
@@ -2396,11 +3083,193 @@ async function resetLocalConfig(): Promise<void> {
     }
 }
 
+// ─── Caisse de secours hors-ligne (SPA pos-offline) ──────────────────────────
+// Remplace l'ancien prototype « Dolibarr local complet » : bundle statique +
+// snapshot JSON (produits, catégories, clients, dernières ventes) rafraîchi en
+// tâche de fond tant que le réseau est là. Bascule instantanée, zéro serveur.
+
+// URL de base de l'instance cloud (avec schéma), pour appeler l'API du module.
+function cloudBaseUrl(): string | null {
+    const cfg = readConfig()
+    if (!cfg.instance) return null
+    if (cfg.freeInstance) return cfg.instance
+    return `https://${cfg.instance}.cieloo.io`
+}
+
+async function switchToOfflinePos(): Promise<void> {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (!isOfflinePosBundlePresent()) {
+        await dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Caisse Locale',
+            message: 'Le bundle pos-offline est introuvable.',
+            detail: 'Lancez « npm run build » dans pos-offline/ (dev) ou réinstallez l\'application.',
+        })
+        return
+    }
+
+    showTransitionSplash('Passage en mode local', 'Préparation de la caisse hors-ligne…')
+
+    // Best-effort : on tente un snapshot tout frais si le cloud répond encore.
+    // En cas d'échec (wifi coupée : le cas nominal), le dernier snapshot suffit.
+    const base = cloudBaseUrl()
+    if (base) {
+        try { await fetchOfflineSnapshot(base) }
+        catch (err) { console.warn('[offline-pos] snapshot frais impossible, on garde le dernier :', (err as Error).message) }
+    }
+
+    if (!hasOfflineSnapshot()) {
+        loadCloudContent() // le splash a remplacé l'affichage : il faut revenir sur quelque chose
+        await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: 'Caisse Locale',
+            message: 'Aucun snapshot de la base n\'est disponible sur cette machine.',
+            detail: 'La caisse doit avoir été connectée au POS au moins une fois avec du réseau '
+                + 'pour que le snapshot (produits, catégories, clients…) soit téléchargé.',
+        })
+        return
+    }
+
+    writeConfig({ ...readConfig(), offlinePosActive: true, offlinePosSince: Date.now() })
+    buildMenu()
+    await mainWindow.loadFile(offlinePosIndexHtml())
+}
+
+// La caisse s'ouvre TOUJOURS directement sur le POS (index.php du module),
+// jamais sur la racine Dolibarr. Si l'utilisateur n'est pas connecté, Dolibarr
+// affiche le login puis redirige vers cette URL.
+function cloudPosUrl(base: string): string {
+    return `${base.replace(/\/$/, '')}/custom/cieloopos/index.php`
+}
+
+async function returnFromOfflinePos(): Promise<void> {
+    writeConfig({ ...readConfig(), offlinePosActive: false, offlinePosSince: undefined })
+    buildMenu()
+
+    // Synchro auto désactivée par défaut (menu Caisse Locale → Config) : pour
+    // l'instant, seul le bouton "Téléverser" du ticket transmet une vente.
+    // Le splash de retour en ligne sert d'écran de synchro des ventes locales
+    // en attente — best-effort : un échec réseau ne bloque jamais le retour
+    // en ligne, les ventes restent en attente et se re-tentent plus tard.
+    const base = cloudBaseUrl()
+    if (base && readConfig().offlinePosAutoSync === true) {
+        showTransitionSplash('Retour en ligne', 'Synchronisation des ventes locales…')
+        try {
+            const report = await syncAllOfflinePendingSales(base, (done, total) => {
+                updateTransitionSplash(`${done} / ${total} vente(s) synchronisée(s)`, total > 0 ? (done / total) * 100 : 100)
+            })
+            if (report.total > 0) {
+                updateTransitionSplash(
+                    report.failed > 0
+                        ? `${report.synced}/${report.total} synchronisées, ${report.failed} en attente`
+                        : `${report.synced} vente(s) synchronisée(s)`,
+                    100
+                )
+                await new Promise((r) => setTimeout(r, report.failed > 0 ? 1800 : 900))
+            }
+        } catch (err) {
+            console.warn('[offline-pos] synchro des ventes locales échouée :', (err as Error).message)
+        }
+    }
+
+    loadCloudContent()
+}
+
+/** Menu Caisse Locale → Config → coche/décoche la synchro auto des ventes au retour en ligne. */
+function toggleOfflinePosAutoSync(): void {
+    writeConfig({ ...readConfig(), offlinePosAutoSync: readConfig().offlinePosAutoSync !== true })
+    buildMenu()
+}
+
+// Action « Mettre à jour le snapshot » du menu : fetch immédiat + toast de résultat.
+async function refreshOfflineSnapshotNow(): Promise<void> {
+    if (!mainWindow) return
+    const base = cloudBaseUrl()
+    if (!base) {
+        showToast({ kind: 'error', title: 'Caisse Locale', message: 'Aucune instance Cieloo configurée.' })
+        return
+    }
+    showToast({ kind: 'info', title: 'Synchronisation…', message: 'Mise à jour du snapshot en cours', duration: 0 })
+    try {
+        const meta = await fetchOfflineSnapshot(base)
+        showToast({
+            kind: 'success',
+            title: 'Snapshot mis à jour',
+            message: `${meta.products} produits, ${meta.categories} catégories, ${meta.customers} clients, `
+                + `${meta.sales} ventes récentes (${Math.round(meta.bytes / 1024)} ko)`,
+        })
+    } catch (err) {
+        showToast({
+            kind: 'error',
+            title: 'Échec de la mise à jour du snapshot',
+            message: `${(err as Error).message} — session POS active et réseau requis.`,
+            duration: 6000,
+        })
+    }
+}
+
+// Throttle : le téléchargement des images progresse par petits paquets ;
+// sans throttle, des dizaines de loadURL par seconde saturent le process.
+function throttleToastProgress(fn: (done: number, total: number) => void, everyMs: number): (done: number, total: number) => void {
+    let last = 0
+    return (done, total) => {
+        const now = Date.now()
+        if (now - last >= everyMs || done === total) {
+            last = now
+            fn(done, total)
+        }
+    }
+}
+
+// Action « Télécharger les images » du menu : purge les marqueurs « sans photo »
+// (pour tout re-vérifier), lance la synchro avec toast de progression, puis
+// toast de résultat final.
+async function syncOfflineImagesNow(): Promise<void> {
+    if (!mainWindow) return
+    const base = cloudBaseUrl()
+    if (!base) {
+        showToast({ kind: 'error', title: 'Caisse Locale', message: 'Aucune instance Cieloo configurée.' })
+        return
+    }
+    clearOfflineImageMissMarkers()
+    showToast({ kind: 'info', title: 'Téléchargement des images…', message: 'Préparation…', progress: 0, duration: 0 })
+
+    const onProgress = throttleToastProgress((done, total) => {
+        showToast({
+            kind: 'info',
+            title: 'Téléchargement des images…',
+            message: `${done} / ${total} vérifiée(s)`,
+            progress: total > 0 ? Math.round((done / total) * 100) : 100,
+            duration: 0,
+        })
+    }, 200)
+
+    const report = await syncOfflineImages(base, onProgress)
+
+    if (report.checked === 0) {
+        showToast({ kind: 'success', title: 'Images déjà à jour', message: 'Aucune nouvelle image à télécharger.' })
+        return
+    }
+    const parts = [`${report.downloaded} téléchargée(s)`, `${report.withoutPhoto} sans photo`, `${report.alreadyCached} déjà en cache`]
+    if (report.errors > 0) parts.push(`${report.errors} erreur(s)`)
+    showToast({
+        kind: report.errors > 0 && report.downloaded === 0 ? 'error' : 'success',
+        title: report.errors > 0 && report.downloaded === 0 ? 'Échec du téléchargement des images' : 'Images synchronisées',
+        message: parts.join(' · ') + (report.firstError ? ` — ${report.firstError}` : ''),
+        duration: report.errors > 0 ? 6500 : 4000,
+    })
+}
+
 // ─── Main window ──────────────────────────────────────────────────────────────
 
-// Point d'entree unique : route vers la caisse locale ou le cloud selon la config.
+// Point d'entree unique : route vers la caisse hors-ligne, la caisse locale
+// (ancien prototype) ou le cloud selon la config.
 function loadContent(): void {
     const config = readConfig()
+    if (config.offlinePosActive && isOfflinePosBundlePresent() && hasOfflineSnapshot()) {
+        void mainWindow?.loadFile(offlinePosIndexHtml())
+        return
+    }
     if (config.localActive && isLocalPackPresent()) {
         void loadLocalContent()
         return
@@ -2414,9 +3283,9 @@ function loadCloudContent(): void {
 
     if (config.instance) {
         if (config.freeInstance) {
-            void mainWindow.loadURL(config.instance)
+            void mainWindow.loadURL(cloudPosUrl(config.instance))
         } else {
-            void mainWindow.loadURL(`https://${config.instance}.cieloo.io`)
+            void mainWindow.loadURL(cloudPosUrl(`https://${config.instance}.cieloo.io`))
         }
         return
     }
@@ -2424,7 +3293,7 @@ function loadCloudContent(): void {
     const suggested = detectBootstrapInstance()
     if (suggested) {
         writeConfig({ ...config, instance: suggested.instance })
-        void mainWindow.loadURL(`https://${suggested.instance}.cieloo.io`)
+        void mainWindow.loadURL(cloudPosUrl(`https://${suggested.instance}.cieloo.io`))
         return
     } else if (isDev && process.env.ELECTRON_RENDERER_URL) {
         void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -2506,6 +3375,15 @@ function createMainWindow(): void {
     mainWindow.on('restore', flushPendingLoadingOverlay)
     mainWindow.on('minimize', hideLoadingOverlayImmediate)
     mainWindow.on('hide', hideLoadingOverlayImmediate)
+    mainWindow.on('move', syncToastBounds)
+    mainWindow.on('resize', syncToastBounds)
+    mainWindow.on('enter-full-screen', syncToastBounds)
+    mainWindow.on('leave-full-screen', syncToastBounds)
+    mainWindow.on('minimize', hideToastImmediate)
+    mainWindow.on('hide', hideToastImmediate)
+    // Fermer la fenêtre principale = quitter la caisse : second écran, fenêtres de
+    // réglages et services annexes sont fermés dans la foulée.
+    mainWindow.on('close', () => shutdownApp(mainWindow))
     mainWindow.on('closed', () => {
         if (showFallbackTimer) {
             clearTimeout(showFallbackTimer)
@@ -2518,6 +3396,12 @@ function createMainWindow(): void {
         }
         if (loadingOverlayWindow && !loadingOverlayWindow.isDestroyed()) loadingOverlayWindow.close()
         loadingOverlayWindow = null
+        if (toastHideTimer) {
+            clearTimeout(toastHideTimer)
+            toastHideTimer = null
+        }
+        if (toastWindow && !toastWindow.isDestroyed()) toastWindow.close()
+        toastWindow = null
     })
 
     mainWindow.webContents.setWindowOpenHandler(({ url }) => handleWindowOpen(url))
@@ -2645,9 +3529,15 @@ window.print=function(){
         }
     })
 
-    // Au lancement, on démarre TOUJOURS en mode en ligne (cloud) par défaut.
-    // L'utilisateur bascule ensuite manuellement en caisse locale via le menu.
-    writeConfig({ ...readConfig(), localActive: false })
+    // Au lancement, on démarre en mode en ligne (cloud) par défaut ; l'utilisateur
+    // bascule ensuite manuellement en caisse locale via le menu.
+    // Exception : en Mode Full Local (caisse 100% locale), on redémarre directement
+    // sur le Dolibarr local, sans instance Cieloo ni synchronisation cloud.
+    if (readConfig().fullLocal === true && isLocalPackPresent()) {
+        writeConfig({ ...readConfig(), localActive: true })
+    } else {
+        writeConfig({ ...readConfig(), localActive: false })
+    }
     loadContent()
 }
 
@@ -2680,6 +3570,60 @@ function registerIpc(): void {
     ipcMain.handle('config:get', () => readConfig())
 
     ipcMain.handle('config:get-bootstrap-instance', () => detectBootstrapInstance())
+
+    // Build de démonstration : le renderer de config affiche alors le choix Cloud / Local.
+    ipcMain.handle('config:is-demo', () => IS_DEMO)
+
+    // Normalise + enregistre l'instance saisie au 1er lancement. Renvoie le nom nettoyé.
+    function saveInstanceFromInput(instance: string): string {
+        const existing = readConfig()
+        if (existing.freeInstance) {
+            let href: string
+            try { href = new URL(instance).href } catch { throw new Error('URL d\'instance invalide') }
+            writeConfig({ ...existing, instance: href })
+            return href
+        }
+        const clean = normalizeInstance(instance)
+        if (!clean) throw new Error('Nom d\'instance invalide')
+        writeConfig({ ...existing, instance: clean })
+        return clean
+    }
+
+    // Setup 1er lancement (build démo) : enregistre l'instance puis démarre en Cloud ou
+    // en Mode Full Local selon le choix de l'utilisateur.
+    ipcMain.handle('config:setup', async (_e, instance: string, mode: 'cloud' | 'local') => {
+        const saved = saveInstanceFromInput(instance)
+
+        if (mode === 'local') {
+            // Caisse 100% locale : on garde le nom d'instance saisi (identification
+            // dashboard + duplication ci-dessous), sans synchro cloud automatique ensuite.
+            writeConfig({ ...readConfig(), fullLocal: true })
+            buildMenu()
+            void reportRustDeskHeartbeat()
+
+            // Installe le pack au besoin SANS charger un POS vierge (évite la page blanche).
+            if (!isLocalPackPresent()) {
+                const installed = await installLocalPack(false)   // page d'erreur déjà gérée si échec
+                if (!installed) return
+            }
+            writeConfig({ ...readConfig(), localActive: true })
+            buildMenu()
+
+            // Puis on duplique automatiquement la base (+ fichiers du site) de l'instance
+            // saisie : sans ça, la caisse locale démarrerait sur une base Dolibarr vierge
+            // (modules absents → pages blanches type /custom/cieloopos/index.php).
+            const instUrl = currentInstanceUrl()
+            if (instUrl) await runDuplicateBase(instUrl)
+            else await loadLocalContent()
+            return
+        }
+
+        // Mode Cloud (défaut)
+        writeConfig({ ...readConfig(), fullLocal: false })
+        void reportRustDeskHeartbeat()
+        if (readConfig().freeInstance) void mainWindow?.loadURL(saved)
+        else void mainWindow?.loadURL(`https://${saved}.cieloo.io`)
+    })
 
     ipcMain.handle('config:save-instance', (_e, instance: string) => {
         const existing = readConfig()
@@ -2998,6 +3942,17 @@ function registerIpc(): void {
         if (urlEditorWindow && !urlEditorWindow.isDestroyed()) urlEditorWindow.close()
     })
 
+    // ── Dupliquer la base (menu Dev, Full Local) ────────────────────────────────
+    ipcMain.handle('dev:duplicate-db-submit', (_e, instance: string) => {
+        const r = duplicateDbResolve
+        duplicateDbResolve = null                 // évite la double-résolution via 'closed'
+        if (duplicateDbWindow && !duplicateDbWindow.isDestroyed()) duplicateDbWindow.close()
+        r?.(instance ?? '')
+    })
+    ipcMain.handle('dev:duplicate-db-cancel', () => {
+        if (duplicateDbWindow && !duplicateDbWindow.isDestroyed()) duplicateDbWindow.close()
+    })
+
     const TECH_PORTS = [10004, 10006]
     type PortInfo = { port: number; pid: number | null; processName: string | null; listening: boolean }
 
@@ -3065,6 +4020,10 @@ function registerIpc(): void {
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+    // Instance déjà en cours : app.quit() est en route, on ne démarre rien.
+    if (!hasSingleInstanceLock) return
+    // Session Dolibarr conservée entre les relances (cookies de session → persistants).
+    startSessionCookiePersistence()
     await startLocalMediaServer()
     void startPrintServer(loadSettings().print)
     startBalance({ resolveBase: resolveCielooBase, resolveOrigin: resolveCielooOrigin })
@@ -3072,17 +4031,34 @@ app.whenReady().then(async () => {
     if (loadSettings().balance.enabled) void refreshRgiStatus()
     setInterval(() => { if (loadSettings().balance.enabled) void refreshRgiStatus() }, 12_000)
 
+    // Mode NACEF : proxy CORS S-MDF tout de suite, réparation des routes en tâche de
+    // fond (UAC ponctuelle uniquement si une route persistante manque encore).
+    if (loadSettings().nacef.enabled) {
+        startNacefProxy()
+        void ensureNacefRoutes()
+    }
+
     buildMenu()
     registerIpc()
+    registerNacefIpc()
     registerUpdaterIpc()
+    registerOfflinePosIpc({
+        returnOnline: () => returnFromOfflinePos(),
+        refreshBaseUrl: () => cloudBaseUrl(),
+        getOfflineSince: () => readConfig().offlinePosSince ?? null,
+    })
+    // Snapshot hors-ligne rafraîchi en tâche de fond tant qu'on est sur le cloud
+    // (session POS requise) ; suspendu en mode hors-ligne ou ancien proto local.
+    startSnapshotAutoRefresh(() => {
+        const cfg = readConfig()
+        if (cfg.offlinePosActive === true || cfg.localActive === true) return null
+        return cloudBaseUrl()
+    })
     createMainWindow()
     initAutoUpdater(() => mainWindow)
 
     // Affiche le texte par défaut sur l'afficheur client (si activé)
     void pushIdleText()
-
-    // Propose le mode caisse locale au tout premier lancement.
-    void offerLocalModeIfNeeded()
 
     installRustDeskIfNeeded().then(async () => {
         // Essaie immédiatement, puis toutes les 15s jusqu'à obtenir l'ID, ensuite toutes les 60s
@@ -3113,15 +4089,79 @@ app.whenReady().then(async () => {
     })
 })
 
-app.on('will-quit', () => {
-    globalShortcut.unregisterAll()
-    void stopPrintServer()
-    stopBalance()
-})
+// ─── Arrêt de l'application ──────────────────────────────────────────────────
+//
+// Fermer la caisse doit TOUT fermer : les fenêtres annexes (second écran, réglages,
+// studio d'édition, éditeur d'URL, contact…) et les process/serveurs lancés par
+// l'app (tray RustDesk, Dolibarr local, serveur d'impression, proxy NACEF…).
+// Sinon l'app reste vivante dans le gestionnaire de tâches (fenêtre annexe encore
+// ouverte) et le verrou d'instance unique empêche de la relancer.
 
-app.on('before-quit', () => {
-    void stopLocalMediaServer()
-    void stopLocalDolibarr()
+/** Délai max accordé à l'arrêt des services avant sortie forcée. */
+const SHUTDOWN_TIMEOUT_MS = 10_000
+
+let isShuttingDown = false
+let shutdownStarted = false
+
+/**
+ * Ferme toutes les fenêtres puis demande la sortie.
+ * `except` : fenêtre déjà en cours de fermeture (on la laisse finir elle-même).
+ */
+function shutdownApp(except?: BrowserWindow | null): void {
+    if (isShuttingDown) return
+    isShuttingDown = true
+
+    // Avant la boucle : neutralise les relances auto du second écran (retry de
+    // démarrage / branchement d'écran) qui rouvriraient une fenêtre après coup.
+    stopSecondScreen()
+
+    // destroy() plutôt que close() : ne peut être annulé ni par un handler
+    // 'close', ni par un beforeunload de la page distante (POS Dolibarr).
+    for (const win of BrowserWindow.getAllWindows()) {
+        if (win === except || win.isDestroyed()) continue
+        win.destroy()
+    }
+
+    app.quit()
+}
+
+/** Arrêt idempotent de tout ce que l'app a démarré (serveurs + process enfants). */
+async function stopEverything(): Promise<void> {
+    stopSecondScreen()   // idempotent : couvre les sorties qui ne passent pas par shutdownApp()
+    globalShortcut.unregisterAll()
+    stopBalance()
+    stopNacefProxy()
+    await Promise.allSettled([
+        stopRustDeskTray(),
+        stopPrintServer(),
+        stopLocalMediaServer(),
+        stopLocalDolibarr(),
+        app.isReady() ? session.defaultSession.cookies.flushStore() : Promise.resolve(),
+    ])
+}
+
+app.on('before-quit', (event) => {
+    // 2e instance refusée par le verrou : elle n'a rien démarré, on la laisse sortir.
+    if (!hasSingleInstanceLock) return
+
+    isShuttingDown = true
+    if (shutdownStarted) return
+    shutdownStarted = true
+
+    // On diffère la sortie le temps de couper proprement MariaDB/PHP : sans ça le
+    // process Electron meurt avant et laisse mariadbd orphelin (base verrouillée au
+    // prochain démarrage).
+    event.preventDefault()
+    void (async () => {
+        try {
+            await Promise.race([
+                stopEverything(),
+                new Promise((resolve) => setTimeout(resolve, SHUTDOWN_TIMEOUT_MS)),
+            ])
+        } finally {
+            app.exit(0)
+        }
+    })()
 })
 
 app.on('window-all-closed', () => {

@@ -1,4 +1,17 @@
-/node_modules
+# Dépendances — PAS de slash initial : s'applique à tous les niveaux
+# (avec "/node_modules", pos-offline/node_modules n'était pas ignoré)
+node_modules/
+
+# Sorties de build
 /out
-.env
 /release
+pos-offline/dist/
+*.tsbuildinfo
+
+# Config vite TS compilée à la volée (fichiers horodatés jetables)
+electron.vite.config.*.mjs
+
+# Secrets
+.env
+.env.*
+!.env.example

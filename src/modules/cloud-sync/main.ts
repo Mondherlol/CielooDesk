@@ -17,6 +17,7 @@ import path from 'node:path'
 import {
     recreateLocalDatabase,
     importSqlGz,
+    importSiteArchive,
     getSyncState,
     setSyncState,
     type TableProgressFn,
@@ -79,10 +80,10 @@ function getJson<T>(deps: SyncDeps, route: string, params?: Record<string, strin
     })
 }
 
-/** Télécharge un flux SQL gzip vers un fichier temporaire. Renvoie le watermark serveur. */
-function downloadGz(deps: SyncDeps, route: string, params: Record<string, string>, onBytes?: (n: number) => void): Promise<{ file: string; until: string | null }> {
+/** Télécharge un flux (SQL gzip ou archive) vers un fichier temporaire. Renvoie le watermark serveur. */
+function downloadGz(deps: SyncDeps, route: string, params: Record<string, string>, onBytes?: (n: number) => void, ext = 'sql.gz'): Promise<{ file: string; until: string | null }> {
     return new Promise((resolve, reject) => {
-        const file = path.join(app.getPath('temp'), `cieloo-sync-${route}-${Date.now()}.sql.gz`)
+        const file = path.join(app.getPath('temp'), `cieloo-sync-${route}-${Date.now()}.${ext}`)
         const req = net.request({ method: 'GET', url: buildUrl(deps, route, params) })
         req.setHeader('X-Terminal-Key', deps.terminalKey)
         req.on('response', (res) => {
@@ -168,8 +169,47 @@ export async function seedLocalFromCloud(deps: SyncDeps, onProgress?: ProgressFn
         await recreateLocalDatabase()
         await importSqlGz(file, importTracker(onProgress, 'Import de la base'))
         setSyncState({ seeded: true, watermark: until })
+        // La base seule ne suffit pas : les modules et fichiers (images, médias, fichiers
+        // remplacés par des modules…) vivent sur le filesystem de l'instance. On rapatrie
+        // aussi tout le site via FTP (best-effort, ne bloque pas le seed de la base).
+        await syncSiteFilesFromCloud(deps, onProgress)
         onProgress?.({ phase: 'sync-done', pct: 100, message: 'Base synchronisée depuis le cloud.' })
         return until
+    } finally {
+        fs.promises.rm(file, { force: true }).catch(() => { /* nettoyage best-effort */ })
+    }
+}
+
+/**
+ * Télécharge TOUT le site de l'instance cloud (htdocs + documents : modules, images,
+ * médias, fichiers remplacés par des modules…) et l'installe par-dessus l'install locale.
+ * Best-effort : si l'endpoint est absent (ancien broker) ou le réseau/FTP échoue, on
+ * n'interrompt PAS le seed de la base — la caisse locale reste fonctionnelle.
+ * Contrat serveur : GET /api/sync/files?instance_url=… (X-Terminal-Key) → archive ZIP
+ * du site (arborescence relative à htdocs, `documents/…` pour le data_root ; fichiers
+ * d'environnement conf.php / .htaccess / install.lock / sessions / backups exclus).
+ */
+export async function syncSiteFilesFromCloud(deps: SyncDeps, onProgress?: ProgressFn): Promise<boolean> {
+    onProgress?.({ phase: 'sync-files', message: 'Téléchargement des fichiers du site (FTP)…' })
+    const onBytes = throttle((n: number) => {
+        onProgress?.({ phase: 'sync-files', message: `Téléchargement des fichiers du site… (${mb(n)})` })
+    }, 400)
+
+    let file: string
+    try {
+        ({ file } = await downloadGz(deps, 'files', {}, onBytes, 'zip'))
+    } catch {
+        onProgress?.({ phase: 'sync-files', message: 'Fichiers du site indisponibles (ignoré).' })
+        return false
+    }
+
+    try {
+        await importSiteArchive(file, onProgress)
+        onProgress?.({ phase: 'sync-files-done', message: 'Fichiers du site synchronisés.' })
+        return true
+    } catch {
+        onProgress?.({ phase: 'sync-files', message: 'Installation des fichiers échouée (ignoré).' })
+        return false
     } finally {
         fs.promises.rm(file, { force: true }).catch(() => { /* nettoyage best-effort */ })
     }

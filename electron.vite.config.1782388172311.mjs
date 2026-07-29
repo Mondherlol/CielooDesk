@@ -8,9 +8,9 @@ var electron_vite_config_default = defineConfig(({ mode }) => {
     main: {
       plugins: [externalizeDepsPlugin()],
       define: {
-        "process.env.DASHBOARD_API_URL": JSON.stringify(env.DASHBOARD_API_URL || "http://102.204.206.120"),
+        "process.env.DASHBOARD_API_URL": JSON.stringify(env.DASHBOARD_API_URL || "https://monitoring.cieloo.io/"),
         "process.env.TERMINAL_API_KEY": JSON.stringify(env.TERMINAL_API_KEY || ""),
-        "process.env.RUSTDESK_SERVER": JSON.stringify(env.RUSTDESK_SERVER || "102.204.206.120"),
+        "process.env.RUSTDESK_SERVER": JSON.stringify(env.RUSTDESK_SERVER || "monitoring.cieloo.io"),
         "process.env.RUSTDESK_KEY": JSON.stringify(env.RUSTDESK_KEY || ""),
         "process.env.RUSTDESK_CONFIG": JSON.stringify(env.RUSTDESK_CONFIG || ""),
         // URL (ou chemin local) du pack de la caisse locale (PHP+MariaDB+Dolibarr).

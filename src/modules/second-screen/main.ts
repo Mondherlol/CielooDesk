@@ -10,6 +10,7 @@ let hasAutoStartedSecondScreen = false
 let pendingManualOpen = false
 let secondScreenMode: 'fullscreen' | 'windowed' = 'fullscreen'
 let secondScreenWindowedBounds: Electron.Rectangle | null = null
+let isShuttingDown = false
 
 const CONTROL_SCHEME = 'cieloo-second-screen'
 const BOOT_RETRY_MAX = 10
@@ -359,6 +360,7 @@ function loadIntoSecondScreen(win: BrowserWindow, targetUrl: string, options: Se
 }
 
 export function ensureSecondScreenWindow(targetUrl?: string, options: SecondScreenOpenOptions = {}): BrowserWindow | null {
+    if (isShuttingDown) return null
     registerDisplayListeners()
     const shouldFocus = options.focus ?? true
 
@@ -477,6 +479,19 @@ export function startSecondScreen(targetUrl: string, options: SecondScreenOpenOp
         if (retryWin) pendingManualOpen = false
     }, 800)
     return win
+}
+
+/**
+ * Fermeture définitive du second écran (arrêt de la caisse). Coupe aussi les
+ * relances programmées : sans ça, le retry de démarrage (ou un branchement
+ * d'écran) pourrait rouvrir une fenêtre pendant la séquence de fermeture.
+ */
+export function stopSecondScreen(): void {
+    isShuttingDown = true
+    resetBootRetry()
+    pendingManualOpen = false
+    if (secondScreenWindow && !secondScreenWindow.isDestroyed()) secondScreenWindow.destroy()
+    secondScreenWindow = null
 }
 
 export function syncSecondScreen(targetUrl: string, options: SecondScreenLoadOptions = {}): void {

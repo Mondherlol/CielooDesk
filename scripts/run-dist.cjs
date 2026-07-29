@@ -1,10 +1,16 @@
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
+// Build de démonstration : `npm run dist:demo` (ou `node scripts/run-dist.cjs --demo`).
+// Propage DEMO_MODE=1 à electron-vite (via process.env, lu par le define du config).
+const IS_DEMO = process.argv.includes('--demo') || process.env.DEMO_MODE === '1'
+if (IS_DEMO) process.env.DEMO_MODE = '1'
+
 function run(cmd, args) {
   const result = spawnSync(cmd, args, {
     stdio: 'inherit',
     shell: process.platform === 'win32',
+    env: process.env,
   })
   if (result.error) {
     console.error(result.error)

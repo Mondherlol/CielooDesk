@@ -11,6 +11,10 @@ files:
   - out/**
   - package.json
 extraResources:
+  # Caisse de secours hors-ligne : bundle statique chargé par la fenêtre
+  # principale quand la wifi coupe (voir src/modules/offline-pos).
+  - from: pos-offline/dist
+    to: pos-offline
   - from: assets
     to: assets
     filter:
@@ -26,7 +30,10 @@ win:
     - nsis
 nsis:
   oneClick: true
-  perMachine: false
+  # Install machine-wide (une invite UAC à l'installation par le technicien). Requis
+  # pour que build/installer.nsh accorde aux Utilisateurs le droit d'écrire dans le
+  # dossier de données partagé C:\ProgramData\CielooPosv2 (multi-comptes Windows).
+  perMachine: true
 publish:
   provider: github
   owner: mondherlol

@@ -5,7 +5,7 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Balance - CielooPos</title>
+  <title>Balance - CaisLà</title>
   <script type="module" src="/src/balance-settings.ts"></script>
   <style>
     .bal-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px 18px; }
@@ -33,6 +33,18 @@
     .btn-primary { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:9px 16px; font-weight:600; cursor:pointer; font-size:13px; }
     .btn-primary:disabled { opacity:.6; cursor:default; }
     .btn-ghost { background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; border-radius:8px; padding:8px 13px; cursor:pointer; font-size:13px; }
+    .bal-advanced { border:1px solid #e2e8f0; border-radius:10px; margin:4px 0 2px; background:#f8fafc; }
+    .bal-advanced > summary {
+      cursor:pointer; list-style:none; padding:12px 16px; font-weight:600; font-size:13px; color:#334155;
+      display:flex; align-items:center; gap:8px; user-select:none;
+    }
+    .bal-advanced > summary::-webkit-details-marker { display:none; }
+    .bal-advanced > summary::before {
+      content:'▸'; font-size:11px; color:#94a3b8; transition:transform .15s ease;
+    }
+    .bal-advanced[open] > summary::before { transform:rotate(90deg); }
+    .bal-advanced > summary .bal-advanced-hint { font-weight:400; color:#94a3b8; font-size:12px; }
+    .bal-advanced .p-section { padding:0 16px 12px; }
   </style>
 </head>
 <body>
@@ -40,23 +52,11 @@
     <header class="print-header">
       <div class="print-header-left">
         <h1>Balance</h1>
-        <p>Génère le fichier d'articles (Dibal / LinéoSoft) déposé pour RGI</p>
+        <p>Génère le fichier d'articles (Dibal) déposé pour RGI</p>
       </div>
     </header>
 
     <section class="card">
-      <div class="p-section">
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="p-section-title">Activer le mode balance</span>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="bal-enabled" />
-            <span class="toggle-track"></span>
-          </label>
-        </div>
-      </div>
-
       <div id="bal-body">
         <div class="p-section">
           <div class="p-section-title">Configuration</div>
@@ -69,53 +69,62 @@
               </div>
             </div>
             <div class="bal-field full">
-              <label for="bal-apikey">Token API Dolibarr (génération auto sans connexion)</label>
-              <input id="bal-apikey" type="text" placeholder="Clé API d'un utilisateur Dolibarr (recommandé)" autocomplete="off" />
-            </div>
-            <div class="bal-field">
               <label for="bal-filename">Nom du fichier</label>
               <input id="bal-filename" type="text" value="Articles.txt" />
-            </div>
-            <div class="bal-field">
-              <label for="bal-type">Type d'article</label>
-              <select id="bal-type">
-                <option value="2">Pesé / KG (2)</option>
-                <option value="1">Unité (1)</option>
-              </select>
-            </div>
-            <div class="bal-field">
-              <label for="bal-decimals">Décimales du prix</label>
-              <input id="bal-decimals" type="number" min="0" max="3" />
-            </div>
-            <div class="bal-field">
-              <label for="bal-namelen">Longueur max du libellé</label>
-              <input id="bal-namelen" type="number" min="1" max="30" />
-            </div>
-            <div class="bal-field">
-              <label for="bal-interval">Rafraîchissement auto (min, 0 = off)</label>
-              <input id="bal-interval" type="number" min="0" max="1440" />
-            </div>
-            <div class="bal-field">
-              <label for="bal-webhook">Port webhook (temps réel local, 0 = off)</label>
-              <input id="bal-webhook" type="number" min="0" max="65535" />
             </div>
           </div>
         </div>
 
-        <div class="p-section">
-          <div class="p-section-title">Correspondance TVA → ID balance</div>
-          <table class="bal-tva-table">
-            <thead><tr><th>Taux TVA (%)</th><th>ID TVA balance</th><th></th></tr></thead>
-            <tbody id="bal-tva-rows"></tbody>
-          </table>
-          <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
-            <button id="bal-tva-add" class="btn-ghost">+ Ajouter un taux</button>
-            <div class="bal-field" style="flex-direction:row; align-items:center; gap:6px;">
-              <label for="bal-default-tvaid" style="margin:0;">ID par défaut</label>
-              <input id="bal-default-tvaid" type="number" min="0" max="99" style="width:70px;" />
+        <details class="bal-advanced">
+          <summary>Configurations avancées <span class="bal-advanced-hint">(token API, format d'export, TVA…)</span></summary>
+
+          <div class="p-section">
+            <div class="bal-grid">
+              <div class="bal-field full">
+                <label for="bal-apikey">Token API Dolibarr (génération auto sans connexion)</label>
+                <input id="bal-apikey" type="text" placeholder="Clé API d'un utilisateur Dolibarr (recommandé)" autocomplete="off" />
+              </div>
+              <div class="bal-field">
+                <label for="bal-type">Type d'article</label>
+                <select id="bal-type">
+                  <option value="2">Pesé / KG (2)</option>
+                  <option value="1">Unité (1)</option>
+                </select>
+              </div>
+              <div class="bal-field">
+                <label for="bal-decimals">Décimales du prix</label>
+                <input id="bal-decimals" type="number" min="0" max="3" />
+              </div>
+              <div class="bal-field">
+                <label for="bal-namelen">Longueur max du libellé</label>
+                <input id="bal-namelen" type="number" min="1" max="30" />
+              </div>
+              <div class="bal-field">
+                <label for="bal-interval">Rafraîchissement auto (min, 0 = off)</label>
+                <input id="bal-interval" type="number" min="0" max="1440" />
+              </div>
+              <div class="bal-field">
+                <label for="bal-webhook">Port webhook (temps réel local, 0 = off)</label>
+                <input id="bal-webhook" type="number" min="0" max="65535" />
+              </div>
             </div>
           </div>
-        </div>
+
+          <div class="p-section">
+            <div class="p-section-title">Correspondance TVA → ID balance</div>
+            <table class="bal-tva-table">
+              <thead><tr><th>Taux TVA (%)</th><th>ID TVA balance</th><th></th></tr></thead>
+              <tbody id="bal-tva-rows"></tbody>
+            </table>
+            <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+              <button id="bal-tva-add" class="btn-ghost">+ Ajouter un taux</button>
+              <div class="bal-field" style="flex-direction:row; align-items:center; gap:6px;">
+                <label for="bal-default-tvaid" style="margin:0;">ID par défaut</label>
+                <input id="bal-default-tvaid" type="number" min="0" max="99" style="width:70px;" />
+              </div>
+            </div>
+          </div>
+        </details>
 
         <div class="p-section">
           <div class="p-section-title">Aperçu &amp; envoi</div>

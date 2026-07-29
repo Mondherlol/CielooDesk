@@ -184,6 +184,15 @@ function printUrlWithWebContents(url: string, config: PrinterConfig): Promise<vo
     })
 }
 
+/**
+ * Imprime un document HTML autonome (ticket de la caisse hors-ligne) sur les
+ * imprimantes ticket configurées — même pipeline silencieux que le POS online.
+ */
+export async function printHtmlReceipt(html: string): Promise<void> {
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+    await printUrlToAllPrinters(dataUrl)
+}
+
 async function printUrlToAllPrinters(url: string): Promise<void> {
     const active = currentSettings.printers.filter(p => p.defaultPrinter !== null)
     if (active.length === 0) throw new Error('Aucune imprimante configurée')

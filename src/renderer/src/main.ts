@@ -12,8 +12,15 @@ const fieldSuffix = document.getElementById('field-suffix') as HTMLSpanElement
 const fieldLabel = document.getElementById('field-label') as HTMLLabelElement
 const setupSub = document.getElementById('setup-sub') as HTMLParagraphElement
 const setupFooter = document.getElementById('setup-footer') as HTMLParagraphElement
+const modeChoice = document.getElementById('mode-choice') as HTMLDivElement
+const modeChoiceInstance = document.getElementById('mode-choice-instance') as HTMLElement
+const modeCloudBtn = document.getElementById('mode-cloud') as HTMLButtonElement
+const modeLocalBtn = document.getElementById('mode-local') as HTMLButtonElement
+const modeBackBtn = document.getElementById('mode-back') as HTMLButtonElement
 
 let isFreeInstance = false
+let isDemo = false
+let pendingInstance = ''
 
 function setLoading(loading: boolean): void {
     submitBtn.disabled = loading
@@ -91,6 +98,13 @@ form.addEventListener('submit', async (e) => {
         }
     }
 
+    // Build de démonstration : on demande d'abord le mode (Cloud / Local).
+    if (isDemo) {
+        pendingInstance = raw
+        showModeChoice(raw)
+        return
+    }
+
     setLoading(true)
 
     try {
@@ -101,6 +115,42 @@ form.addEventListener('submit', async (e) => {
         setError('Impossible d\'enregistrer la configuration. Réessayez.')
     }
 })
+
+// ─── Choix du mode (build de démonstration) ─────────────────────────────────────
+
+function showModeChoice(instance: string): void {
+    modeChoiceInstance.textContent = isFreeInstance ? instance : `${instance}.cieloo.io`
+    form.classList.add('hidden')
+    setupFooter.classList.add('hidden')
+    modeChoice.classList.remove('hidden')
+}
+
+function hideModeChoice(): void {
+    modeChoice.classList.add('hidden')
+    form.classList.remove('hidden')
+    if (!isFreeInstance) setupFooter.classList.remove('hidden')
+    input.focus()
+}
+
+async function chooseMode(mode: 'cloud' | 'local'): Promise<void> {
+    modeCloudBtn.disabled = true
+    modeLocalBtn.disabled = true
+    modeBackBtn.disabled = true
+    try {
+        await window.cieloo.config.setup(pendingInstance, mode)
+        // Le process principal enchaîne (chargement cloud ou écran d'install local).
+    } catch {
+        modeCloudBtn.disabled = false
+        modeLocalBtn.disabled = false
+        modeBackBtn.disabled = false
+        hideModeChoice()
+        setError('Impossible d\'enregistrer la configuration. Réessayez.')
+    }
+}
+
+modeCloudBtn.addEventListener('click', () => void chooseMode('cloud'))
+modeLocalBtn.addEventListener('click', () => void chooseMode('local'))
+modeBackBtn.addEventListener('click', () => hideModeChoice())
 
 // Auto-focus
 input.focus()
@@ -114,6 +164,14 @@ void window.cieloo.config.get().then(config => {
     setupSub.textContent = 'Entrez l\'URL complète de votre instance pour démarrer.'
     setupFooter.style.display = 'none'
 }).catch(() => { /* garder l'UI par défaut */ })
+
+void window.cieloo.config.isDemo().then((demo) => {
+    isDemo = demo
+    if (demo) {
+        // En démo, le bouton n'enregistre pas encore : il ouvre le choix Cloud / Local.
+        btnLabel.textContent = 'Continuer'
+    }
+}).catch(() => { /* défaut : build normal (cloud direct) */ })
 
 void prefillInstance().catch(() => {
     // Non-blocking: manual entry remains available if auto-detection fails.

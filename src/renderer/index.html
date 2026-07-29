@@ -7,7 +7,7 @@
       content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CielooPos — Configuration</title>
+    <title>CaisLà — Configuration</title>
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
@@ -60,6 +60,26 @@
         <p class="setup-footer" id="setup-footer">
           L'application restera verrouillée sur <strong>*.cieloo.io</strong>
         </p>
+
+        <!-- Choix du mode (build de démonstration uniquement) -->
+        <div class="mode-choice hidden" id="mode-choice">
+          <p class="mode-choice-sub">
+            Comment voulez-vous démarrer <strong id="mode-choice-instance"></strong> ?
+          </p>
+          <div class="mode-grid">
+            <button class="mode-card" id="mode-cloud" type="button">
+              <span class="mode-emoji">☁️</span>
+              <span class="mode-name">Mode Cloud</span>
+              <span class="mode-desc">Caisse en ligne, synchronisée avec le serveur Cieloo.</span>
+            </button>
+            <button class="mode-card" id="mode-local" type="button">
+              <span class="mode-emoji">💻</span>
+              <span class="mode-name">Mode Local</span>
+              <span class="mode-desc">Caisse 100% locale, sans connexion Internet requise.</span>
+            </button>
+          </div>
+          <button class="mode-back" id="mode-back" type="button">← Modifier l'instance</button>
+        </div>
       </div>
     </div>
   </body>

@@ -1,0 +1,453 @@
+{
+  "generated_at": "2026-07-19T10:00:00Z",
+  "currency": "EUR",
+  "categories": [
+    {
+      "id": 1,
+      "label": "Boissons",
+      "color": "#0ea5e9"
+    },
+    {
+      "id": 2,
+      "label": "Épicerie",
+      "color": "#f59e0b"
+    },
+    {
+      "id": 3,
+      "label": "Frais",
+      "color": "#10b981"
+    },
+    {
+      "id": 4,
+      "label": "Boulangerie",
+      "color": "#d97706"
+    },
+    {
+      "id": 5,
+      "label": "Snacks",
+      "color": "#8b5cf6"
+    },
+    {
+      "id": 6,
+      "label": "Hygiène",
+      "color": "#ec4899"
+    }
+  ],
+  "products": [
+    {
+      "id": 101,
+      "ref": "EAU-050",
+      "label": "Eau minérale 50cl",
+      "barcode": "3057640257773",
+      "price_ttc": 0.8,
+      "tva_tx": 5.5,
+      "category_ids": [
+        1
+      ],
+      "price_min": 0.5
+    },
+    {
+      "id": 102,
+      "ref": "EAU-150",
+      "label": "Eau minérale 1,5L",
+      "barcode": "3057640101106",
+      "price_ttc": 1.2,
+      "tva_tx": 5.5,
+      "category_ids": [
+        1
+      ]
+    },
+    {
+      "id": 103,
+      "ref": "COLA-033",
+      "label": "Cola 33cl",
+      "barcode": "5449000000996",
+      "price_ttc": 1.8,
+      "tva_tx": 5.5,
+      "category_ids": [
+        1
+      ]
+    },
+    {
+      "id": 104,
+      "ref": "JUS-OR-1L",
+      "label": "Jus d'orange 1L",
+      "barcode": "3502110000132",
+      "price_ttc": 2.5,
+      "tva_tx": 5.5,
+      "category_ids": [
+        1
+      ]
+    },
+    {
+      "id": 105,
+      "ref": "CAFE-EXPR",
+      "label": "Café expresso",
+      "barcode": null,
+      "price_ttc": 1.6,
+      "tva_tx": 10,
+      "category_ids": [
+        1
+      ]
+    },
+    {
+      "id": 106,
+      "ref": "THE-MENT",
+      "label": "Thé à la menthe",
+      "barcode": null,
+      "price_ttc": 1.5,
+      "tva_tx": 10,
+      "category_ids": [
+        1
+      ]
+    },
+    {
+      "id": 201,
+      "ref": "PAT-500",
+      "label": "Pâtes penne 500g",
+      "barcode": "8076809513722",
+      "price_ttc": 1.4,
+      "tva_tx": 5.5,
+      "category_ids": [
+        2
+      ]
+    },
+    {
+      "id": 202,
+      "ref": "RIZ-1KG",
+      "label": "Riz basmati 1kg",
+      "barcode": "3038350208705",
+      "price_ttc": 3.2,
+      "tva_tx": 5.5,
+      "category_ids": [
+        2
+      ]
+    },
+    {
+      "id": 203,
+      "ref": "HUIL-OLV",
+      "label": "Huile d'olive 75cl",
+      "barcode": "3560070846238",
+      "price_ttc": 7.9,
+      "tva_tx": 5.5,
+      "category_ids": [
+        2
+      ]
+    },
+    {
+      "id": 204,
+      "ref": "CONS-TOM",
+      "label": "Tomates pelées 400g",
+      "barcode": "8001440398403",
+      "price_ttc": 1.1,
+      "tva_tx": 5.5,
+      "category_ids": [
+        2
+      ]
+    },
+    {
+      "id": 205,
+      "ref": "SUCRE-1K",
+      "label": "Sucre en poudre 1kg",
+      "barcode": "3165430126051",
+      "price_ttc": 1.6,
+      "tva_tx": 5.5,
+      "category_ids": [
+        2
+      ]
+    },
+    {
+      "id": 301,
+      "ref": "LAIT-1L",
+      "label": "Lait demi-écrémé 1L",
+      "barcode": "3520836330015",
+      "price_ttc": 1.3,
+      "tva_tx": 5.5,
+      "category_ids": [
+        3
+      ]
+    },
+    {
+      "id": 302,
+      "ref": "BEUR-250",
+      "label": "Beurre doux 250g",
+      "barcode": "3451790522017",
+      "price_ttc": 2.9,
+      "tva_tx": 5.5,
+      "category_ids": [
+        3
+      ]
+    },
+    {
+      "id": 303,
+      "ref": "YAOU-X4",
+      "label": "Yaourts nature x4",
+      "barcode": "3033490004521",
+      "price_ttc": 2.1,
+      "tva_tx": 5.5,
+      "category_ids": [
+        3
+      ]
+    },
+    {
+      "id": 304,
+      "ref": "OEUF-X6",
+      "label": "Œufs plein air x6",
+      "barcode": "3251320021037",
+      "price_ttc": 2.4,
+      "tva_tx": 5.5,
+      "category_ids": [
+        3
+      ]
+    },
+    {
+      "id": 305,
+      "ref": "EMMEN-200",
+      "label": "Emmental râpé 200g",
+      "barcode": "3228020170025",
+      "price_ttc": 2.7,
+      "tva_tx": 5.5,
+      "category_ids": [
+        3
+      ]
+    },
+    {
+      "id": 401,
+      "ref": "BAG-TRAD",
+      "label": "Baguette tradition",
+      "barcode": null,
+      "price_ttc": 1.2,
+      "tva_tx": 5.5,
+      "category_ids": [
+        4
+      ]
+    },
+    {
+      "id": 402,
+      "ref": "CROIS",
+      "label": "Croissant beurre",
+      "barcode": null,
+      "price_ttc": 1.1,
+      "tva_tx": 5.5,
+      "category_ids": [
+        4
+      ]
+    },
+    {
+      "id": 403,
+      "ref": "PAIN-CHOC",
+      "label": "Pain au chocolat",
+      "barcode": null,
+      "price_ttc": 1.2,
+      "tva_tx": 5.5,
+      "category_ids": [
+        4
+      ]
+    },
+    {
+      "id": 404,
+      "ref": "PAIN-CMP",
+      "label": "Pain complet 400g",
+      "barcode": null,
+      "price_ttc": 2.3,
+      "tva_tx": 5.5,
+      "category_ids": [
+        4
+      ]
+    },
+    {
+      "id": 501,
+      "ref": "CHIPS-150",
+      "label": "Chips nature 150g",
+      "barcode": "3168930010265",
+      "price_ttc": 1.9,
+      "tva_tx": 5.5,
+      "category_ids": [
+        5
+      ]
+    },
+    {
+      "id": 502,
+      "ref": "CHOC-TAB",
+      "label": "Chocolat noir 100g",
+      "barcode": "7622210449283",
+      "price_ttc": 2.2,
+      "tva_tx": 5.5,
+      "category_ids": [
+        5
+      ]
+    },
+    {
+      "id": 503,
+      "ref": "BISC-CHOC",
+      "label": "Biscuits chocolat",
+      "barcode": "7622300336738",
+      "price_ttc": 2.5,
+      "tva_tx": 5.5,
+      "category_ids": [
+        5
+      ]
+    },
+    {
+      "id": 504,
+      "ref": "BONB-200",
+      "label": "Bonbons assortis 200g",
+      "barcode": "8000500310427",
+      "price_ttc": 2.8,
+      "tva_tx": 20,
+      "category_ids": [
+        5
+      ]
+    },
+    {
+      "id": 601,
+      "ref": "SAVON-LIQ",
+      "label": "Savon liquide 300ml",
+      "barcode": "3600550910414",
+      "price_ttc": 2.6,
+      "tva_tx": 20,
+      "category_ids": [
+        6
+      ]
+    },
+    {
+      "id": 602,
+      "ref": "DENT-75",
+      "label": "Dentifrice 75ml",
+      "barcode": "8718951388765",
+      "price_ttc": 2.4,
+      "tva_tx": 20,
+      "category_ids": [
+        6
+      ]
+    },
+    {
+      "id": 603,
+      "ref": "MOUCH-X10",
+      "label": "Mouchoirs x10",
+      "barcode": "4006670117702",
+      "price_ttc": 1.7,
+      "tva_tx": 20,
+      "category_ids": [
+        6
+      ]
+    },
+    {
+      "id": 604,
+      "ref": "GEL-HYDRO",
+      "label": "Gel hydroalcoolique 100ml",
+      "barcode": "3059943009318",
+      "price_ttc": 3.1,
+      "tva_tx": 20,
+      "category_ids": [
+        6
+      ]
+    }
+  ],
+  "customers": [
+    {
+      "id": 1,
+      "name": "Client comptant",
+      "code_client": "CU001",
+      "barcode": null,
+      "phone": null,
+      "email": null,
+      "points": null,
+      "visits": null,
+      "tier": null
+    },
+    {
+      "id": 2,
+      "name": "Dupont Marie",
+      "code_client": "CU002",
+      "barcode": "2100000000023",
+      "phone": "0612345678",
+      "email": "marie.dupont@example.com",
+      "points": 24701,
+      "visits": 19,
+      "tier": {
+        "label": "Platine",
+        "color": "#2563eb"
+      }
+    },
+    {
+      "id": 3,
+      "name": "Martin Paul",
+      "code_client": "CU003",
+      "barcode": null,
+      "phone": "0698765432",
+      "email": null,
+      "points": 2,
+      "visits": 1,
+      "tier": {
+        "label": "Bronze",
+        "color": "#b45309"
+      }
+    },
+    {
+      "id": 4,
+      "name": "Ben Salah Amine",
+      "code_client": "CU004",
+      "barcode": "2100000000047",
+      "phone": "20100150",
+      "email": null,
+      "points": 0,
+      "visits": 0,
+      "tier": {
+        "label": "Bronze",
+        "color": "#b45309"
+      }
+    }
+  ],
+  "sales": [
+    {
+      "id": 901,
+      "ref": "FA2607-0042",
+      "date": "2026-07-19T09:41:00",
+      "total_ttc": 12.4,
+      "paid": true,
+      "customer": "Client comptant"
+    },
+    {
+      "id": 900,
+      "ref": "FA2607-0041",
+      "date": "2026-07-19T09:22:00",
+      "total_ttc": 6.1,
+      "paid": true,
+      "customer": "Dupont Marie"
+    },
+    {
+      "id": 899,
+      "ref": "FA2607-0040",
+      "date": "2026-07-18T18:03:00",
+      "total_ttc": 25.7,
+      "paid": false,
+      "customer": "Martin Paul"
+    }
+  ],
+  "user": {
+    "id": 1,
+    "login": "demo",
+    "name": "SuperAdmin"
+  },
+  "fidelite_enabled": true,
+  "terminal": {
+    "id": 1,
+    "name": "Caisse Démo",
+    "warehouse_id": null,
+    "default_customer_id": null,
+    "product_display_mode": "images"
+  },
+  "settings": {
+    "hide_categories": false,
+    "hide_category_images": false,
+    "hide_product_images": false,
+    "show_product_reference": 0,
+    "show_cat_product_count": true,
+    "hide_empty_categories": true,
+    "sort_product_field": "label",
+    "show_ht": false,
+    "hide_zero_price_products": false,
+    "root_category_id": 0
+  }
+}

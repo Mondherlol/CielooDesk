@@ -524,6 +524,67 @@ body {
     font-weight: 600;
 }
 
+/* ─── Status pill (NACEF, …) ─────────────────────────────────────────────────── */
+
+.status-pill {
+    flex-shrink: 0;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: .78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    background: var(--border);
+    color: var(--muted);
+}
+
+.status-pill.ok {
+    background: #e7f4ec;
+    color: var(--success);
+}
+
+.status-pill.ko {
+    background: var(--danger-light);
+    color: var(--danger);
+}
+
+/* ─── NACEF : liste des destinations ─────────────────────────────────────────── */
+
+.nacef-dest-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.nacef-dest-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.nacef-dest-row .setting-input {
+    flex: 1;
+}
+
+.nacef-dest-remove {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: .9rem;
+    line-height: 1;
+    transition: background .12s, color .12s, border-color .12s;
+}
+
+.nacef-dest-remove:hover {
+    background: var(--danger-light);
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
 /* ─── Buttons ────────────────────────────────────────────────────────────────── */
 
 .btn {

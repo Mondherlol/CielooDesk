@@ -5,7 +5,7 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Configuration — CielooPos</title>
+  <title>Configuration — CaisLà</title>
   <link rel="icon" href="/favicon.ico" />
   <script type="module" src="/src/settings.ts"></script>
 </head>
@@ -38,6 +38,9 @@
     <button class="sidebar-item" data-tab="balance">
       <i data-lucide="scale" class="sidebar-item-icon"></i> Balance
     </button>
+    <button class="sidebar-item" data-tab="nacef">
+      <i data-lucide="shield-check" class="sidebar-item-icon"></i> NACEF
+    </button>
     <button class="sidebar-item" id="sidebar-avancees" data-tab="avancees" style="display:none">
       <i data-lucide="settings-2" class="sidebar-item-icon"></i> Options Avancées
     </button>
@@ -58,7 +61,7 @@
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">Mode plein écran au démarrage</span>
-            <span class="setting-desc">Lance CielooPos en plein écran dès l'ouverture</span>
+            <span class="setting-desc">Lance CaisLà en plein écran dès l'ouverture</span>
           </div>
           <label class="toggle">
             <input type="checkbox" id="toggle-fullscreen" />
@@ -150,7 +153,7 @@
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">Lancer au démarrage de Windows</span>
-            <span class="setting-desc">Démarre CielooPos automatiquement avec l'ordinateur</span>
+            <span class="setting-desc">Démarre CaisLà automatiquement avec l'ordinateur</span>
           </div>
           <label class="toggle">
             <input type="checkbox" id="toggle-startup" />
@@ -161,6 +164,17 @@
 
       <div class="section">
         <p class="section-title">Caisse</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Vérifier les mises à jour au démarrage</span>
+            <span class="setting-desc">Recherche automatiquement une nouvelle version au lancement de la caisse. Si désactivé, la vérification reste possible à tout moment via le menu Support.</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-auto-update" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
 
         <div class="setting-row">
           <div class="setting-info">
@@ -212,7 +226,7 @@
         <div class="setting-row setting-row-stack">
           <div class="setting-info">
             <span class="setting-label">Nom du terminal</span>
-            <span class="setting-desc">Assigné automatiquement depuis CielooPOS</span>
+            <span class="setting-desc">Assigné automatiquement depuis CaisLà</span>
           </div>
           <input type="text" class="setting-input setting-input--readonly" id="input-terminal-name" placeholder="Non assigné" readonly />
         </div>
@@ -249,7 +263,7 @@
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">Activer le mode balance</span>
-            <span class="setting-desc">Génère les articles pour la balance (Dibal / LinéoSoft) et ajoute l'onglet « Balance » dans le menu Outils</span>
+            <span class="setting-desc">Génère les articles pour la balance (Dibal) et ajoute l'onglet « Balance » dans le menu Outils</span>
           </div>
           <label class="toggle">
             <input type="checkbox" id="toggle-balance" />
@@ -263,6 +277,93 @@
             <span class="setting-desc">Dossier d'export, correspondance TVA, aperçu et envoi des articles</span>
           </div>
           <button class="btn btn-default" id="btn-open-balance-settings">Ouvrir</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab: NACEF ────────────────────────────────────────────────────── -->
+    <div id="tab-nacef" class="settings-tab">
+      <h2 class="tab-title">NACEF (fiscalisation)</h2>
+
+      <div class="section">
+        <p class="section-title">Mode NACEF</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Activer le mode NACEF</span>
+            <span class="setting-desc">Au démarrage : ajoute les routes réseau vers les serveurs fiscaux (élévation demandée une seule fois) et lance le proxy CORS local vers le boîtier S-MDF.</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-nacef" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Proxy CORS local</p>
+
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info">
+            <span class="setting-label">Cible du proxy</span>
+            <span class="setting-desc">Boîtier S-MDF local (http://localhost:10006), ou pour un poste relayé, le proxy d'un autre poste du réseau (ex. http://192.168.1.50:10007). L'URL appelée par le site reste toujours 127.0.0.1 — seule la cible change.</span>
+          </div>
+          <input type="text" class="setting-input" id="nacef-proxy-target" placeholder="http://localhost:10006" spellcheck="false" />
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-desc">Redémarre le proxy local immédiatement avec la nouvelle cible.</span>
+          </div>
+          <button class="btn btn-primary" id="btn-nacef-save-target" type="button">Enregistrer</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">Routes fiscales</p>
+
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info">
+            <span class="setting-label">Passerelle (next hop)</span>
+            <span class="setting-desc">Adresse locale par laquelle joindre les serveurs fiscaux (ex. 192.168.1.253)</span>
+          </div>
+          <input type="text" class="setting-input" id="nacef-gateway" placeholder="192.168.1.253" spellcheck="false" />
+        </div>
+
+        <div class="setting-row setting-row-stack">
+          <div class="setting-info">
+            <span class="setting-label">Serveurs fiscaux (destinations)</span>
+            <span class="setting-desc">IP publiques routées via la passerelle (masque /32). Une IP par ligne.</span>
+          </div>
+          <div id="nacef-dest-list" class="nacef-dest-list"></div>
+          <button class="btn btn-default" id="btn-nacef-add-dest" type="button">+ Ajouter une destination</button>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-desc">Enregistrer applique les nouvelles routes (élévation demandée si le mode est activé et qu'une route manque). Modifier la passerelle ne supprime pas les anciennes routes.</span>
+          </div>
+          <button class="btn btn-primary" id="btn-nacef-save-routes" type="button">Enregistrer</button>
+        </div>
+      </div>
+
+      <div class="section" id="nacef-status-section" style="display:none">
+        <p class="section-title">État</p>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Proxy CORS S-MDF</span>
+            <span class="setting-desc" id="nacef-proxy-desc">—</span>
+          </div>
+          <span class="status-pill" id="nacef-proxy-pill">—</span>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Routes fiscales</span>
+            <span class="setting-desc" id="nacef-routes-desc">—</span>
+          </div>
+          <span class="status-pill" id="nacef-routes-pill">—</span>
         </div>
       </div>
     </div>

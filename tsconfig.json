@@ -9,5 +9,12 @@
         "types": [
             "node"
         ]
-    }
+    },
+    // pos-offline est un sous-projet Vite autonome avec son propre tsconfig (JSX).
+    "exclude": [
+        "pos-offline",
+        "node_modules",
+        "out",
+        "release"
+    ]
 }
