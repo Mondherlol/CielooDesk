@@ -11,6 +11,10 @@ pos-offline/dist/
 # Config vite TS compilée à la volée (fichiers horodatés jetables)
 electron.vite.config.*.mjs
 
+# Logiciel constructeur DIBAL (835 Mo) : conserve en local, jamais dans git.
+# N'est PAS embarque dans le build (electron-builder.yml filtre 4 fichiers d'assets).
+assets/Dossier Balance DIBAL 042021-20220331T154906Z-001/
+
 # Secrets
 .env
 .env.*
