@@ -1,6 +1,6 @@
 {
   "name": "CielooPosv2",
-  "version": "1.0.3",
+  "version": "2.0.1",
   "description": "CielooPos desktop shell",
   "main": "out/main/index.js",
   "author": "Mondher",

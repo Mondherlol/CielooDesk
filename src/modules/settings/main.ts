@@ -31,7 +31,7 @@ export const BARCODE_PRINTER_ID = 'printer-barcode'
 export const BARCODE_SHEET_PRINTER_ID = 'printer-barcode-sheet'
 
 // Dimensions par défaut (mm) pour chaque type d'imprimante
-const DEFAULT_POS_DIMS = { w: 63.5, h: 297 }
+const DEFAULT_POS_DIMS = { w: 64, h: 297 }
 const DEFAULT_BARCODE_LABEL_DIMS = { w: 40, h: 30 }
 const DEFAULT_BARCODE_SHEET_DIMS = { w: 210, h: 297 }
 
@@ -251,8 +251,8 @@ const DEFAULTS: AppSettings = {
             id: 'printer-default',
             label: 'Imprimante 1',
             defaultPrinter: null,
-            paperWidth: 63.5,
-            paperHeight: 297,
+            paperWidth: DEFAULT_POS_DIMS.w,
+            paperHeight: DEFAULT_POS_DIMS.h,
             copies: 1,
         }],
         barcodePrinter: {

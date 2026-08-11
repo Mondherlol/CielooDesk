@@ -9,6 +9,11 @@ let activeTabIndex = 0
 
 const SECTIONS_CACHE_KEY = 'cieloo-multiprint-sections'
 
+// Dimensions par defaut d'une imprimante ticket (mm). Doit rester aligne sur
+// DEFAULT_POS_DIMS dans src/modules/settings/main.ts.
+const DEFAULT_PAPER_WIDTH = 64
+const DEFAULT_PAPER_HEIGHT = 297
+
 function saveSectionsToCache(): void {
     try { localStorage.setItem(SECTIONS_CACHE_KEY, JSON.stringify(sections)) } catch {}
 }
@@ -56,8 +61,8 @@ function syncPrintersWithSections(loadedSections: MultiprintSection[]): void {
                 id,
                 label: section.label,
                 defaultPrinter: null,
-                paperWidth: 80,
-                paperHeight: 297,
+                paperWidth: DEFAULT_PAPER_WIDTH,
+                paperHeight: DEFAULT_PAPER_HEIGHT,
                 copies: 1,
             })
         }
@@ -84,8 +89,8 @@ function collectTab(config: PrinterConfig, suffix: string | number): void {
     const copiesEl  = g<HTMLInputElement>(`inp-copies-${suffix}`)
 
     if (printerEl) config.defaultPrinter = printerEl.value || null
-    if (widthEl)   config.paperWidth    = clampInt(Number(widthEl.value), 1, 1000, 80)
-    if (heightEl)  config.paperHeight   = clampInt(Number(heightEl.value), 1, 2000, 297)
+    if (widthEl)   config.paperWidth    = clampInt(Number(widthEl.value), 1, 1000, DEFAULT_PAPER_WIDTH)
+    if (heightEl)  config.paperHeight   = clampInt(Number(heightEl.value), 1, 2000, DEFAULT_PAPER_HEIGHT)
     if (copiesEl)  config.copies        = clampInt(Number(copiesEl.value), 1, 99, 1)
 }
 
@@ -416,8 +421,8 @@ function renderTabs(): void {
                 id: `printer-${Date.now()}`,
                 label: `Imprimante ${printers.length + 1}`,
                 defaultPrinter: null,
-                paperWidth: 80,
-                paperHeight: 297,
+                paperWidth: DEFAULT_PAPER_WIDTH,
+                paperHeight: DEFAULT_PAPER_HEIGHT,
                 copies: 1,
             })
             activeTabIndex = printers.length - 1
